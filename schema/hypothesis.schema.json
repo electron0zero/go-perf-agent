@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent hypothesis",
+  "description": "One testable performance-optimization hypothesis grounded in a real telemetry signal.",
+  "type": "object",
+  "required": ["id", "pattern", "symbol", "file", "rationale", "metric", "benchmark"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "stable slug, e.g. h-001-slice-prealloc-decoder",
+      "pattern": "^h-[a-z0-9-]+$"
+    },
+    "pattern": {
+      "type": "string",
+      "description": "patterns.yaml id this hypothesis instantiates"
+    },
+    "symbol": {
+      "type": "string",
+      "description": "fully-qualified hot symbol, e.g. github.com/grafana/tempo/pkg/parquet.(*Decoder).Read"
+    },
+    "file": {
+      "type": "string",
+      "description": "source file (repo-relative) holding the edit site"
+    },
+    "line": {
+      "type": "integer",
+      "description": "approximate line of the edit site"
+    },
+    "evidence": {
+      "type": "object",
+      "description": "the real-data signal that motivated this hypothesis",
+      "properties": {
+        "source": { "type": "string", "enum": ["pyroscope", "tempo", "local-pprof"] },
+        "metric": { "type": "string", "description": "e.g. cpu, alloc_space, alloc_objects" },
+        "value": { "type": "string", "description": "measured weight, e.g. 12.4% of CPU, 3.1GB alloc_space" },
+        "query": { "type": "string", "description": "exact gcx/pprof query that produced it" }
+      }
+    },
+    "rationale": {
+      "type": "string",
+      "description": "why this pattern applies to this symbol, tied to the evidence"
+    },
+    "metric": {
+      "type": "string",
+      "enum": ["ns_op", "B_op", "allocs_op"],
+      "description": "the benchstat metric expected to improve (the proof metric)"
+    },
+    "expected_direction": {
+      "type": "string",
+      "enum": ["decrease"],
+      "default": "decrease"
+    },
+    "benchmark": {
+      "type": "object",
+      "required": ["pkg"],
+      "properties": {
+        "pkg": { "type": "string", "description": "package path, e.g. ./pkg/parquet/..." },
+        "name": { "type": "string", "description": "existing Benchmark name, or empty if one must be written" },
+        "needs_authoring": { "type": "boolean", "default": false }
+      }
+    },
+    "risk": { "type": "string", "enum": ["low", "med", "high"] },
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "validating", "proved", "rejected", "need_more_data"],
+      "default": "proposed",
+      "description": "proposed -> validating -> one of: proved (benchstat win + tests pass), rejected (no win / regression / tests fail), need_more_data (no faithful benchmark, non-reproducible, or needs production telemetry to decide)"
+    },
+    "verdict": {
+      "type": "object",
+      "description": "filled by the validation harness",
+      "properties": {
+        "kept": { "type": "boolean" },
+        "tests_passed": { "type": "boolean" },
+        "benchstat": { "type": "string", "description": "raw benchstat table" },
+        "delta_pct": { "type": "number", "description": "% change on the proof metric (negative = improvement)" },
+        "p_value": { "type": "number" },
+        "reason": { "type": "string", "description": "human-readable keep/reject reason" },
+        "worktree": { "type": "string" },
+        "patch": { "type": "string", "description": "path to the diff applied" }
+      }
+    }
+  }
+}

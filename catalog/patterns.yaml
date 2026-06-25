@@ -1,0 +1,179 @@
+# go-perf-agent pattern catalog
+#
+# Source: Dave Cheney's high-performance-go-workshop and Bryan Boreham's fork
+#   https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
+#   https://github.com/bboreham/high-performance-go-workshop
+#
+# Each pattern is a hypothesis template. A hotspot (hot function / allocation site / slow
+# span) is matched against these. `detect` heuristics pre-filter source sites
+# deterministically; the LLM only justifies/ranks among pre-filtered candidates.
+#
+# Fields:
+#   id          stable slug
+#   title       human name
+#   optimizes   cpu | allocs | bytes | latency | gc   (the benchstat metric that should move)
+#   signal      what telemetry symptom makes this pattern plausible
+#   detect      grep-style regexes (any-match) that flag candidate source sites; [] = needs LLM
+#   transform   the one change to try
+#   benchmark   what the benchmark must exercise to prove it
+#   confidence  prior likelihood the change helps when the signal is present (low|med|high)
+#   risk        correctness risk of the transform (low|med|high)
+
+version: 1
+patterns:
+  - id: slice-prealloc
+    title: Preallocate slices with known capacity
+    optimizes: allocs
+    signal: growslice / runtime.makeslice / append hot in alloc profile
+    detect:
+      - '\bappend\([a-zA-Z_][a-zA-Z0-9_]*,'
+      - 'make\(\[\][^,]+\)\s*$'
+    transform: "make([]T, 0, n) with n derived from a known length, before the append loop"
+    benchmark: build the slice at a representative size; measure B/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: map-prealloc
+    title: Preallocate maps with size hint
+    optimizes: allocs
+    signal: runtime.mapassign / hashGrow hot in profile
+    detect:
+      - 'make\(map\['
+    transform: "make(map[K]V, n) with a size hint"
+    benchmark: populate the map at a representative size; measure allocs/op
+    confidence: med
+    risk: low
+
+  - id: string-builder
+    title: Replace + concatenation with strings.Builder
+    optimizes: allocs
+    signal: runtime.concatstrings / many small string allocs
+    detect:
+      - '\+=\s*"'
+      - '[a-zA-Z0-9_]\s*\+=\s*[a-zA-Z_].*\bstring'
+    transform: "accumulate into strings.Builder (Grow if size known), or bytes.Buffer"
+    benchmark: build the string in a loop; measure B/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: byte-string-conv
+    title: Avoid repeated []byte<->string conversions
+    optimizes: allocs
+    signal: runtime.slicebytetostring / stringtoslicebyte hot
+    detect:
+      - 'string\(\[\]byte'
+      - '\[\]byte\(.*string'
+      - 'string\([a-zA-Z_][a-zA-Z0-9_]*\)'
+    transform: "keep one representation across the hot path; use the compiler's special-cased
+      forms (string(b) in map key / comparison does not allocate)"
+    benchmark: exercise the conversion site at scale; measure allocs/op
+    confidence: med
+    risk: med
+
+  - id: sync-pool
+    title: Recycle large/temporary objects with sync.Pool
+    optimizes: gc
+    signal: high alloc rate of fixed-size buffers; GC CPU significant
+    detect: []   # needs LLM: only worth it for hot, short-lived, fixed-size allocations
+    transform: "pool the buffer/object; Get/Put around the work, reset on Put"
+    benchmark: concurrent reuse at representative size; measure B/op, allocs/op, and GC
+    confidence: med
+    risk: high
+
+  - id: struct-field-align
+    title: Reorder struct fields to cut padding
+    optimizes: bytes
+    signal: large count of a struct in heap; struct has mixed-width fields out of order
+    detect: []   # needs struct layout analysis, not regex
+    transform: "order fields largest-to-smallest alignment to remove padding"
+    benchmark: allocate N of the struct; measure B/op (or unsafe.Sizeof in a test)
+    confidence: med
+    risk: low
+
+  - id: range-copy
+    title: Avoid copying large structs in range loops
+    optimizes: cpu
+    signal: duffcopy / large memmove hot in a range loop
+    detect:
+      - 'for\s+[a-zA-Z_, ]+:?=\s*range\b'
+    transform: "range over index, or use a pointer slice, to avoid per-iteration struct copy"
+    benchmark: range a slice of large structs; measure ns/op
+    confidence: med
+    risk: low
+
+  - id: bounds-check-elim
+    title: Help the compiler eliminate bounds checks
+    optimizes: cpu
+    signal: runtime.panicIndex / repeated bounds checks in a tight loop (asm shows CMP/JMP)
+    detect: []   # needs -gcflags=-d=ssa/check_bce or asm inspection
+    transform: "hoist a length check (e.g. `_ = b[n-1]`) or reslice once so indices are proven safe"
+    benchmark: tight indexed loop over a slice; measure ns/op
+    confidence: low
+    risk: low
+
+  - id: inline-small-fn
+    title: Keep hot leaf functions inlineable
+    optimizes: cpu
+    signal: function-call overhead dominates a tiny hot function (seen in CPU profile)
+    detect: []   # needs `go build -gcflags=-m` inlining report
+    transform: "shrink the function under the inlining budget, or remove the call in the hot path"
+    benchmark: call the function in a tight loop; measure ns/op
+    confidence: low
+    risk: low
+
+  - id: escape-to-stack
+    title: Keep allocations on the stack (avoid escape)
+    optimizes: allocs
+    signal: heap alloc of values that look local; `-gcflags=-m` shows "escapes to heap"
+    detect: []   # needs escape analysis report
+    transform: "avoid taking address / passing to interface that forces heap; return value not pointer"
+    benchmark: call the allocating function in a loop; measure allocs/op
+    confidence: med
+    risk: med
+
+  - id: reflection-hot-path
+    title: Remove reflection from hot paths
+    optimizes: cpu
+    signal: reflect.Value.* hot in CPU profile
+    detect:
+      - 'reflect\.'
+      - 'encoding/json'
+    transform: "replace reflection with generated code or concrete-type fast path"
+    benchmark: the encode/decode/dispatch op; measure ns/op
+    confidence: med
+    risk: high
+
+  - id: buffered-io
+    title: Buffer small reads/writes
+    optimizes: latency
+    signal: syscall.read/write hot; many small I/O ops in trace spans
+    detect:
+      - '\.Read\('
+      - '\.Write\('
+    transform: "wrap in bufio.Reader/Writer to batch syscalls"
+    benchmark: stream through the reader/writer; measure ns/op and syscall count
+    confidence: med
+    risk: low
+
+  - id: mutex-contention
+    title: Reduce lock contention
+    optimizes: latency
+    signal: sync.(*Mutex).Lock hot in block/mutex profile; serialized spans in traces
+    detect:
+      - 'sync\.(Mutex|RWMutex)'
+      - '\.Lock\(\)'
+    transform: "shard the lock, use RWMutex for read-heavy, or atomic for counters"
+    benchmark: parallel benchmark (b.RunParallel) hitting the lock; measure ns/op under -cpu
+    confidence: med
+    risk: high
+
+  - id: defer-hot-loop
+    title: Hoist defer out of hot loops
+    optimizes: cpu
+    signal: runtime.deferproc/deferreturn measurable in a hot, high-iteration function
+    detect:
+      - '\bdefer\b'
+    transform: "call cleanup directly at the end of the hot loop body instead of defer"
+    benchmark: loop with the deferred call; measure ns/op
+    confidence: low
+    risk: med
