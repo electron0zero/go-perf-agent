@@ -49,6 +49,7 @@ var cli struct {
 	Validate        validateCmd        `cmd:"" help:"Baseline, apply a patch, then verdict (non-LLM path)"`
 	ValidateAll     validateAllCmd     `cmd:"" help:"Set up baselines for every hypothesis"`
 	Report          reportCmd          `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
+	Eval            evalCmd            `cmd:"" help:"Run golden scenarios N times and check the engine's verdicts (flakiness-aware)"`
 }
 
 func main() {
