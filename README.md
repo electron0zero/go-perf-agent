@@ -3,13 +3,13 @@
 An LLM-assisted agent that audits a Go codebase for performance and proposes optimizations that
 are proven, not guessed.
 
-It pulls real data - Tempo traces and Pyroscope profiles (via the `gcx` CLI), or a local
-`go pprof` profile when neither is set up - ranks the hot code, forms hypotheses from a catalog of
-common Go performance patterns, and tests each in an isolated git worktree with benchmarks. A
-change is reported as proven only when `benchstat` says so, so you get a short, grounded list
-worth shipping instead of speculation.
+It pulls real data - [Tempo](https://github.com/grafana/tempo) traces and [Pyroscope](https://github.com/grafana/pyroscope) profiles (via the
+[`gcx`](https://github.com/grafana/gcx) CLI), or a local [`go pprof`](https://pkg.go.dev/runtime/pprof) profile when neither is set up - ranks the hot code,
+forms hypotheses from a catalog of common Go performance patterns, and tests each in an isolated git
+worktree with benchmarks. A change is reported as proven only when [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat) says so, so you get a short,
+grounded list worth shipping instead of speculation.
 
-The engine is a single Go binary; the loop is a Claude Code skill plus four agents.
+The tool is a single Go binary, the loop is a [Claude Code](https://docs.claude.com/en/docs/claude-code) skill plus four agents.
 
 ## How it works
 
@@ -18,45 +18,23 @@ They connect through files under `.go-perf-agent/` (the source of truth), not di
 
 ```mermaid
 flowchart TD
-    user([USER]) --> skill[["skill (orchestrator)"]]
+    user([USER]) --> rank["RANK<br/>production telemetry (via gcx) or code diff.<br/> used to build ranked hotspots in codebase"]
+    rank --> hyp["HYPOTHESIZE<br/>one hypothesis per code hotspot"]
+    hyp -->|"per hotspot"| hyp
+    hyp --> val["VALIDATE<br/>one change in a worktree. <br/> each hypothesis is either proved, rejected, or needs more data"]
+    val -->|"per hypothesis"| val
+    val --> critic["CRITIQUE<br/>only proved hypothesis. <br/>it can only downgrade a hypothesis"]
+    critic --> report["REPORT<br/>.go-perf-agent/report.md"]
+    report --> ship([USER ships and verifies in prod])
 
-    %% COLLECT + EXTRACT - codebase-wide telemetry is the core; a diff is the alternate
-    skill --> qt(["gpa-query-telemetry"])
-    skill -. alt .-> diff["target-diff<br/>PR / local diff"]
-    qt -->|"gcx LGTM or local pprof"| prof[/"profiles/"/]
-    prof --> hsCmd["hotspots"]
-    hsCmd --> hs[("hotspots.json<br/>ranked candidates")]
-    diff --> hs
-
-    %% HYPOTHESIZE - one analyst per candidate, in parallel
-    hs --> an(["gpa-analyst x N"])
-    an --> hyp[("hypotheses.json")]
-
-    %% VALIDATE - one validation per hypothesis, each in its own worktree
-    hyp --> val(["gpa-validation x N"])
-    val --> bb["bench-baseline"]
-    bb --> edit["ONE change in wt/&lt;id&gt;"]
-    edit --> bv["bench-verdict"]
-    bv --> gates{"gates: structural ·<br/>correctness · benchstat"}
-    gates --> verdict[("runs/&lt;id&gt;/verdict.json<br/>proved | rejected | need_more_data")]
-
-    %% CRITIQUE - proved only, can only downgrade
-    verdict -->|proved| critic(["gpa-critic<br/>downgrade-only"])
-    critic --> report["report"]
-    report --> rep[("report.md")]
-    rep --> ship([USER ships behind a flag])
-    ship --> prod([verify in prod])
-
-    classDef agent fill:#dae8fc,stroke:#6c8ebf,color:#000;
-    classDef cmd fill:#d5e8d4,stroke:#82b366,color:#000;
-    classDef file fill:#fff2cc,stroke:#d6b656,color:#000;
-    class qt,an,val,critic agent;
-    class diff,hsCmd,bb,bv,report cmd;
-    class prof,hs,hyp,verdict,rep file;
+    classDef step fill:#dae8fc,stroke:#6c8ebf,color:#000;
+    class rank,hyp,val,critic,report step;
 ```
 
-Blue = LLM agent · green = Go binary command · yellow = `.go-perf-agent/` file. `bench-regression`
-(base-vs-head) and `eval` (golden scenarios) are separate entry points, not shown.
+Each stage is a Claude Code agent; the deterministic work (ranking, benchmarks, the benchstat gate)
+is the Go binary. Stages connect through files under `.go-perf-agent/`, not direct messages; the
+self-loops run once per hotspot / hypothesis. `bench-regression` (base-vs-head) and `eval` (golden
+scenarios) are separate entry points, not shown.
 
 ## How to use
 
@@ -156,8 +134,10 @@ Not a good fit:
 
 ## Acknowledgements
 
-Built on the Grafana LGTM stack and Pyroscope, the [`gcx`](https://github.com/grafana/gcx) CLI,
-Go's `pprof` and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), and
+Built on the Grafana LGTM stack and [Pyroscope](https://github.com/grafana/pyroscope), the
+[`gcx`](https://github.com/grafana/gcx) CLI, Go's
+[`pprof`](https://pkg.go.dev/runtime/pprof) and
+[`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), and
 [`alecthomas/kong`](https://github.com/alecthomas/kong).
 
 ## Credits
