@@ -6,18 +6,14 @@ It can pull data like traces from Grafana Tempo and profiles from Grafana Pyrosc
 or a local `go pprof` profile when Tempo or Pyroscope is not set up.
 
 With the data, it ranks the hot code, forms hypotheses against by using a catalog of common Go performance patterns,
-and tests each one in an isolated git worktree with benchmarks. 
-
-A change is only reported as proven when `benchstat` says so.
+and tests each one in an isolated git worktree with benchmarks. A change is only reported as proven when `benchstat` says so.
 
 The tool is a single Go binary, and the core loop is a Claude Code skill plus four agents for the steps
 
-Why it exists: performance work should start from a real signal and end with a measured result.
-The agent grounds every suggestion in a profile or trace and gates every change behind a
-statistical benchmark, so you get a short list of changes worth shipping instead of a wall of
-speculative advice.
+The agent grounds every suggestion in a profile or trace and gates every change behind a benchmark, so you get a short list
+of changes worth shipping and digging more into.
 
-## How it connects
+## How it works
 
 The skill orchestrates; four agents do the reasoning; the Go binary does the deterministic work.
 They connect through files under `.go-perf-agent/` (the source of truth), not direct messages.
@@ -68,9 +64,12 @@ points, not shown.
 ## How to use
 
 Prerequisites: Go 1.23+, [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
-(`go install golang.org/x/perf/cmd/benchstat@latest`), and `git`. For production telemetry,
-install and authenticate [`gcx`](https://github.com/grafana/gcx) (`gcx auth login`). gcx is
-optional - without it the agent profiles locally.
+(`go install golang.org/x/perf/cmd/benchstat@latest`), and `git`. 
+
+For production telemetry, install and authenticate [`gcx`](https://github.com/grafana/gcx) (`gcx auth login`). 
+
+gcx is optional but recommended, but it can work without it the agent profiles locally but local can mislead.
+use gcx with production telemetry for the best results.
 
 Build:
 
@@ -78,13 +77,12 @@ Build:
 go build -o go-perf-agent .     # or: go install .
 ```
 
-Run it as an agent (recommended): load this repo's `.claude/` (run Claude Code from here, or
-copy/symlink `.claude/skills/go-perf-agent` and `.claude/agents/gpa-*.md` into the target repo
-or `~/.claude/`), then invoke the `go-perf-agent` skill from the target module root. The skill
-asks you for the codebase path, what is in/out of scope, and the service or target function, then
-drives the loop, and writes `.go-perf-agent/report.md`.
+Run it as an agent (recommended): load this repo's `.claude/` (run Claude Code from here, or  copy/symlink `.claude/skills/go-perf-agent` and `.claude/agents/gpa-*.md` into the target repo or `~/.claude/`),
+then invoke the `go-perf-agent` skill from the target module root. 
 
-Or drive the stages by hand from the target module root:
+The skill asks you for the codebase path, what is in/out of scope, and the service or target function, then drives the loop, and writes `.go-perf-agent/report.md`.
+
+you can also run the stages by hand from the target module root:
 
 ```bash
 go-perf-agent scope --include "pkg/parquet,tempodb" --exclude "vendor"   # focus the audit
@@ -100,6 +98,74 @@ go-perf-agent report
 See `.claude/skills/go-perf-agent/SKILL.md` for the full loop, the agents, scope, the
 PROVED/REJECTED/NEED_MORE_DATA gate, and configuration.
 
+## Use cases
+
+The same loop runs from three starting points. A running service (telemetry-driven) is the main
+one - it scans the whole in-scope codebase by what is actually hot in production. The two
+diff-driven ones reuse the exact same gates on a smaller, changed-code candidate set.
+
+### 1. A production service - start from a service + time window (main path)
+
+You have a Go service emitting Pyroscope profiles / Tempo traces and want code-level wins backed
+by real load. The agent ranks the whole in-scope codebase by production cost and works the top.
+
+Agent: invoke the `go-perf-agent` skill and say e.g. "audit `tempo-ingester` over the last 1h,
+scope `pkg/parquet` and `tempodb`". It asks for anything missing (datasource UID, etc.), then
+runs the loop and writes `.go-perf-agent/report.md`.
+
+By hand:
+
+```bash
+go-perf-agent scope --include "pkg/parquet,tempodb" --exclude "vendor"
+go-perf-agent collect-profiles --service tempo-ingester --window 1h                       # cpu + alloc leaders
+go-perf-agent collect-traces   --service tempo-ingester --window 1h --ds-uid <tempo-uid>  # optional
+go-perf-agent hotspots                                                                    # ranked candidates
+#   form hypotheses (skill/agents) -> validate each -> report
+go-perf-agent report
+```
+
+After a proved change ships behind a flag, re-run the same `collect-profiles` + `hotspots` and
+confirm the hot symbol's weight actually dropped in production - the local benchmark is necessary,
+not sufficient.
+
+### 2. A GitHub PR - review the changed code
+
+Two goals, both reuse the gate: optimize the code the PR touched, and/or check the PR did not
+make a changed function slower.
+
+Triage without touching your tree (reads the patch via `gh`):
+
+```bash
+go-perf-agent target-diff --pr https://github.com/org/repo/pull/123   # changed funcs -> candidates
+```
+
+To validate or optimize (validation edits code in a worktree), check the PR out and treat it as a
+local committed diff against the base branch:
+
+```bash
+gh pr checkout 123
+go-perf-agent target-diff --base main     # changed funcs in the checked-out PR -> candidates + scope
+#   form hypotheses on the changed funcs -> validate -> report
+```
+
+Regression check on a changed function that has a benchmark (base vs PR head, no edit):
+
+```bash
+go-perf-agent bench-regression --pkg ./pkg/x --bench BenchmarkY --base main   # REGRESSION | CLEAN | INCONCLUSIVE
+```
+
+### 3. A local diff - work in progress
+
+The PR case for your own changes, before you even open a PR - point it at uncommitted work or your
+branch's commits.
+
+```bash
+go-perf-agent target-diff                 # default: working-tree changes vs HEAD (uncommitted)
+go-perf-agent target-diff --base main     # or: your branch's commits vs main
+#   form hypotheses on the changed funcs -> validate -> report
+go-perf-agent bench-regression --pkg ./pkg/x --bench BenchmarkY --base main   # optional regression check
+```
+
 ## When to use
 
 Good fits:
@@ -107,19 +173,15 @@ Good fits:
 - You have a hot package or function (or a local profile) and want hypotheses tested, not just listed.
 - You want to scope an audit to part of a large repo and keep it off vendored/generated code.
 
-Not a fit:
+Not a good fit:
 - Micro-tuning with no signal
-- A replacement for production validation - a local benchmark win is a starting point, not proof.
+- A replacement for production validation – a local benchmark win is a starting point with limited data.
 
 ## Warnings & gotchas
 
-- LLM-assisted: every finding is a hypothesis. A PROVED verdict is a local-benchmark win, not
-  truth. always re-check the same telemetry in production before trusting it.
-- Local benchmarks can mislead: production hardware, input distributions, load, and concurrency
-  differ. The agent interleaves baseline/candidate runs to cancel machine noise, but that does
-  not substitute for a production check.
-- Nothing is applied to your tree automatically. Changes are made in throwaway git worktrees
-  under `.go-perf-agent/wt/`; proved ones are left for you to review (`git -C <wt> diff`) and
+- every finding is a hypothesis. A PROVED verdict is a local-benchmark win, not truth. always re-check the same telemetry in production before trusting it.
+- Local benchmarks can mislead: in production there is different hardware, input distributions, load, etc. The agent interleaves baseline/candidate runs to cancel machine noise, but that does not substitute for a production check.
+- Changes are made in throwaway git worktrees under `.go-perf-agent/wt/`; proved ones are left for you to review (`git -C <wt> diff`) and
   cherry-pick.
 - Scope it. Without `scope`, the whole module is in play. Use `--include`/`--exclude` to keep the
   agents on the code you care about and off vendored, generated, or frozen packages.
