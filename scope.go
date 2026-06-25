@@ -76,6 +76,13 @@ func inScope(pkg string, sc *Scope) bool {
 	return matches(sc.Include)
 }
 
+// needsDependencyOptIn reports whether a hypothesis edits a dependency (vendored OSS / generated)
+// whose in-tree path the current scope does not include yet, so it must not be auto-validated
+// until the user opts in by scoping to that path.
+func needsDependencyOptIn(h *Hypothesis, sc *Scope) bool {
+	return h.Dependency != nil && h.Dependency.Path != "" && !inScope(h.Dependency.Path, sc)
+}
+
 // resolvePkg maps a pprof/pyroscope symbol to a repo-relative package dir, or "" if it is not
 // ours (stdlib / vendor / runtime), which means not editable.
 //

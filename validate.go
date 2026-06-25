@@ -30,6 +30,18 @@ func runBenchBaseline(id string) (string, error) {
 	_ = os.MkdirAll(runDir, 0o755)
 	arun := mustAbs(runDir)
 
+	// a dependency-change hypothesis only validates once the user opts its path into scope -
+	// otherwise the structural gate would reject the edit anyway. Signal it cleanly instead.
+	if needsDependencyOptIn(hyp, loadScope()) {
+		fmt.Fprintf(os.Stderr, "DEPENDENCY_OPT_IN: %s edits dependency %s; opt in with `go-perf-agent scope --include %s` then re-run\n", id, hyp.Dependency.Path, hyp.Dependency.Path)
+		_ = writeJSON(filepath.Join(runDir, "verdict.json"), Verdict{
+			ID: id, Status: "need_more_data",
+			Reason:  "dependency change needs opt-in: add " + hyp.Dependency.Path + " to scope, then re-run",
+			Verdict: &VerdictDetail{Reason: "dependency change needs opt-in (" + hyp.Dependency.Path + ")"},
+		})
+		return "", nil
+	}
+
 	if fileExists(wt) {
 		info("worktree exists, reusing %s", wt)
 	} else {

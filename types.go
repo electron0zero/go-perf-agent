@@ -34,19 +34,30 @@ type Benchmark struct {
 	NeedsAuthoring bool   `json:"needs_authoring,omitempty"`
 }
 
+// Dependency marks a hypothesis whose fix lives in a dependency we don't own but can change: a
+// vendored OSS module (in-tree, so benchmarkable) or generated code. It is a normal hypothesis;
+// the harness just requires the user to opt in (put Path in scope) before validating it, and the
+// change must be upstreamed or carried as a vendor patch to actually ship.
+type Dependency struct {
+	Path     string `json:"path"`               // in-tree dir to edit, e.g. vendor/github.com/parquet-go/parquet-go
+	Kind     string `json:"kind"`               // vendored-oss | generated
+	Upstream string `json:"upstream,omitempty"` // where to upstream it, e.g. github.com/parquet-go/parquet-go
+}
+
 // Hypothesis matches schema/hypothesis.schema.json. Authored by the LLM; consumed by the harness.
 type Hypothesis struct {
-	ID        string          `json:"id"`
-	Pattern   string          `json:"pattern"`
-	Symbol    string          `json:"symbol"`
-	File      string          `json:"file,omitempty"`
-	Line      int             `json:"line,omitempty"`
-	Evidence  json.RawMessage `json:"evidence,omitempty"`
-	Rationale string          `json:"rationale"`
-	Metric    string          `json:"metric"` // ns_op | B_op | allocs_op
-	Benchmark Benchmark       `json:"benchmark"`
-	Risk      string          `json:"risk,omitempty"`
-	Status    string          `json:"status,omitempty"`
+	ID         string          `json:"id"`
+	Pattern    string          `json:"pattern"`
+	Symbol     string          `json:"symbol"`
+	File       string          `json:"file,omitempty"`
+	Line       int             `json:"line,omitempty"`
+	Evidence   json.RawMessage `json:"evidence,omitempty"`
+	Rationale  string          `json:"rationale"`
+	Metric     string          `json:"metric"` // ns_op | B_op | allocs_op
+	Benchmark  Benchmark       `json:"benchmark"`
+	Dependency *Dependency     `json:"dependency,omitempty"` // set when the fix is in a dependency
+	Risk       string          `json:"risk,omitempty"`
+	Status     string          `json:"status,omitempty"`
 }
 
 type VerdictDetail struct {

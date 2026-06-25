@@ -46,10 +46,45 @@ telemetry summary (`.go-perf-agent/telemetry/summary.json`), the profiles, and t
 }
 ```
 
+## Dependency / generated-code hotspots are still hypotheses
+
+If the real lever is NOT in this module's own source, do not default to `null`:
+
+- stdlib / runtime / genuinely unfixable -> `null`.
+- A vendored OSS dependency (e.g. `github.com/parquet-go/parquet-go` under `vendor/`) is
+  changeable: it is open source we can patch and the vendored copy is in-tree, so it is
+  benchmarkable here before being upstreamed. Emit a NORMAL hypothesis and set the `dependency`
+  field (`kind: "vendored-oss"`).
+- Generated code (`*.pb.go`, `DO NOT EDIT`) -> emit a normal hypothesis with
+  `dependency.kind: "generated"`; the eventual edit belongs in the generator / proto options.
+
+It is just a hypothesis that happens to touch a dependency, so it goes in `hypotheses.json` like
+any other. Set `benchmark.pkg` to the dependency's in-tree package and add the `dependency` block:
+
+```json
+{
+  "id": "h-007-sync-pool-rowgrouprows-readrows",
+  "pattern": "sync-pool",
+  "symbol": "github.com/parquet-go/parquet-go.(*rowGroupRows).ReadRows",
+  "file": "vendor/github.com/parquet-go/parquet-go/row_group.go",
+  "evidence": {"source":"pyroscope","metric":"inuse_space","value":"27%","query":"<cmd>"},
+  "rationale": "what to change and why it should cut the metric",
+  "metric": "B_op",
+  "benchmark": {"pkg":"./vendor/github.com/parquet-go/parquet-go","name":"","needs_authoring": true},
+  "dependency": {"path":"vendor/github.com/parquet-go/parquet-go","kind":"vendored-oss","upstream":"github.com/parquet-go/parquet-go"},
+  "risk": "med", "status": "proposed"
+}
+```
+
+The harness will not auto-validate it until the user opts in (scopes to `dependency.path`); until
+then bench-baseline writes a `need_more_data` verdict telling the user how to opt in. Shipping a
+proved dependency change still needs an upstream PR or a carried vendor patch - say so.
+
 ## Rules
 
 - Only report code you actually read; tie the claim to the loop/alloc you can point at. No
   reasoning-free speedups.
-- One symbol yields zero or one hypothesis - never stack patterns.
-- Scope is already enforced (only `candidate` hotspots reach you, and the harness rejects
-  out-of-scope edits later) - just return `null` if the symbol is not a real, in-scope target.
+- One symbol yields zero or one hypothesis (a dependency hypothesis counts) - never stack patterns.
+- For in-module symbols, scope is already enforced (only `candidate` hotspots reach you, and the
+  harness rejects out-of-scope edits later) - return `null` only when there is no real target and
+  no dependency/generated lever worth surfacing.

@@ -99,9 +99,18 @@ benchmark that can prove it. Rules:
   matching the pattern's `optimizes`.
 - If no benchmark exercises the symbol, set `benchmark.needs_authoring: true` and name the
   package; you will author it in the worktree during validation.
-- Prefer low-`risk` patterns first. Skip anything in generated/vendored code.
+- Prefer low-`risk` patterns first.
+- Also send the top few NON-editable hot symbols (high-weight vendored OSS / generated code,
+  `editable:false` in hotspots.json) to analysts - they are excluded from `candidate` but are
+  changeable, and the analyst will return a `DEPENDENCY_CHANGE_NEEDED` object for them rather
+  than dropping a real, large lever on the floor.
 - Delegate the per-symbol analysis to parallel `gpa-analyst` agents (one per candidate
   hotspot); collect their structured objects into the array, dropping nulls.
+- When the real lever is in a vendored OSS dependency (e.g. `parquet-go`) or generated code, the
+  analyst still returns a normal hypothesis - with the `dependency` field set (`path`, `kind`,
+  `upstream`). It goes in `hypotheses.json` like any other; it is just a hypothesis that touches a
+  dependency. The harness will not auto-validate it until the user opts in by scoping to
+  `dependency.path` (bench-baseline writes a `need_more_data` "opt-in" verdict otherwise).
 
 ## Step 4 - VALIDATE (tools measure, you edit) - one hypothesis at a time
 
@@ -155,6 +164,17 @@ patch that includes the authored benchmark - inspect/extract it with
 `git -C .go-perf-agent/wt/<id> diff HEAD` (plain `git diff` omits the staged-but-new benchmark
 file). A finding handed back without its benchmark and its numbers is not reviewable. Proved
 worktrees are left intact (and staged) so the user can review and cherry-pick.
+
+Also surface any hypotheses with a `dependency` field (their bench-baseline verdict is
+`need_more_data` "opt-in") under a "Dependency / generated-code changes to evaluate" heading: the
+dependency, hot symbol + weight, the proposed change, and the ship path (upstream PR or vendor
+patch). They are real hypotheses, just not validated yet because they touch code we don't own. If
+the user opts in to one, widen scope to its `dependency.path` (e.g.
+`go-perf-agent scope --include "vendor/github.com/<dep>"`) and re-run VALIDATE on that id: the
+vendored copy compiles and benchmarks like any package, the gate proves/rejects it, the critic
+vets it. Always state that shipping a proved dependency change requires upstreaming it (a PR to
+the project) or carrying a vendor patch - the local benchmark win does not change the dependency
+for real until then.
 
 ## Step 7 - VERIFY IN PRODUCTION (always state this)
 

@@ -59,6 +59,16 @@
         "needs_authoring": { "type": "boolean", "default": false }
       }
     },
+    "dependency": {
+      "type": "object",
+      "description": "set when the fix lives in a dependency we don't own but can change (vendored OSS or generated code). It is a normal hypothesis; the harness requires the user to opt in (put path in scope) before validating, and shipping needs an upstream PR or vendor patch.",
+      "required": ["path", "kind"],
+      "properties": {
+        "path": { "type": "string", "description": "in-tree dir to edit, e.g. vendor/github.com/parquet-go/parquet-go" },
+        "kind": { "type": "string", "enum": ["vendored-oss", "generated"] },
+        "upstream": { "type": "string", "description": "where to upstream the change, e.g. github.com/parquet-go/parquet-go" }
+      }
+    },
     "risk": { "type": "string", "enum": ["low", "med", "high"] },
     "status": {
       "type": "string",
