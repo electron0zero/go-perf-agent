@@ -146,6 +146,45 @@ func TestRankHotspotsAggregatesAcrossFiles(t *testing.T) {
 	}
 }
 
+// gatherHotspots end-to-end: reads leaderboard files from gpaDir, labels metrics from filenames,
+// keeps a symbol per metric, and tags editability. Guards the inuse-vs-alloc + blend bugs.
+func TestGatherHotspots(t *testing.T) {
+	defer setModulePath("github.com/grafana/tempo")()
+	dir := t.TempDir()
+	old := gpaDir
+	gpaDir = dir
+	defer func() { gpaDir = old }()
+	if err := os.MkdirAll(filepath.Join(dir, "profiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "profiles", "svc.cpu.leaderboard.json"),
+		`[{"function":"github.com/grafana/tempo/pkg/a.F","value":100},{"function":"runtime.x","value":50}]`)
+	writeFile(t, filepath.Join(dir, "profiles", "svc.inuse.leaderboard.json"),
+		`[{"function":"github.com/grafana/tempo/pkg/a.F","value":10}]`)
+
+	hots, err := gatherHotspots("", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sm struct{ symbol, metric string }
+	got := map[sm]Hotspot{}
+	for _, h := range hots {
+		got[sm{h.Symbol, h.Metric}] = h
+	}
+	if len(hots) != 3 {
+		t.Fatalf("got %d hotspots, want 3 (F/cpu, runtime.x/cpu, F/inuse): %+v", len(hots), hots)
+	}
+	if h := got[sm{"github.com/grafana/tempo/pkg/a.F", "cpu"}]; h.WeightPct != 66.6667 || !h.Editable {
+		t.Errorf("F/cpu = %+v, want 66.6667%% editable", h)
+	}
+	if h := got[sm{"runtime.x", "cpu"}]; h.Editable {
+		t.Errorf("runtime.x should not be editable: %+v", h)
+	}
+	if h := got[sm{"github.com/grafana/tempo/pkg/a.F", "inuse"}]; h.WeightPct != 100 {
+		t.Errorf("F/inuse = %+v, want 100%% (own metric)", h)
+	}
+}
+
 func TestRankHotspotsScopeAndEditable(t *testing.T) {
 	defer setModulePath("github.com/grafana/tempo")()
 	raws := []rawHot{

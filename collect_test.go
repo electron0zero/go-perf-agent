@@ -16,6 +16,21 @@ func TestSafeServiceName(t *testing.T) {
 	}
 }
 
+func TestWindowSeconds(t *testing.T) {
+	cases := map[string]int{"1h": 3600, "6h": 21600, "30m": 1800, "90m": 5400, "bad": 3600, "": 3600}
+	for in, want := range cases {
+		if got := windowSeconds(in); got != want {
+			t.Errorf("windowSeconds(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestNameOr(t *testing.T) {
+	if nameOr("", "def") != "def" || nameOr("svc", "def") != "svc" {
+		t.Error("nameOr wrong")
+	}
+}
+
 func TestFlamegraphLeaderboard(t *testing.T) {
 	// flamebearer: names[] indexed by node; levels[] are [offset,total,self,nameIdx,...] quads.
 	// foo self = 40 (lvl1) + 10 (lvl2) = 50; bar = 30; baz = 20; total/other excluded.
