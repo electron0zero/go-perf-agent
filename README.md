@@ -31,7 +31,7 @@ go build -o go-perf-agent .     # or: go install .
 
 Run it as an agent (recommended): load this repo's `.claude/` (run Claude Code from here, or
 copy/symlink `.claude/skills/go-perf-agent` and `.claude/agents/gpa-*.md` into the target repo
-or `~/.claude/`), then invoke the `go-perf-agent` skill from the target module root. `gpa-control`
+or `~/.claude/`), then invoke the `go-perf-agent` skill from the target module root. The skill
 asks you for the codebase path, what is in/out of scope, and the service or target function, then
 drives the loop and writes `.go-perf-agent/report.md`.
 

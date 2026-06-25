@@ -63,10 +63,7 @@ truth; your return mirrors it.
 
 - One change per hypothesis. Never batch. The verdict must be attributable to that one change.
 - A faster-but-wrong change is `rejected` (the correctness test catches it) - never proved.
-- These are enforced in code by `bench-verdict`, not just here: editing the benchmark/test you
-  are judged by, or any out-of-scope file, is an automatic structural REJECT. Do not try - fix
-  the production code in scope, leave the ruler alone.
+- `bench-verdict` structurally rejects edits to the benchmark/test you are judged by or to any
+  out-of-scope/vendored/generated file - so don't. Fix the production code in scope, leave the
+  ruler alone. If the win genuinely needs out-of-scope changes, that's `need_more_data`.
 - `proved` means "worth shipping behind a flag and verifying in production", not "done". Say so.
-- Never edit `vendor/`, generated files, or anything outside the scope in
-  `.go-perf-agent/scope.json`. If the change would require touching out-of-scope code, it is
-  `need_more_data` with that reason.

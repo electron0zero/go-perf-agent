@@ -31,16 +31,13 @@ COLLECT -> EXTRACT -> HYPOTHESIZE -> VALIDATE (per worktree) -> REPORT -> VERIFY
 
 ## Agents (in `.claude/agents/`)
 
-The orchestrator spawns specialists; each maps to a stage. You can drive the loop yourself
-following the steps below, or delegate to these:
+You are the orchestrator - drive the loop below and spawn these four specialists (there is no
+separate control agent; this skill is the controller):
 
-- `gpa-control` - orchestrator; sequences the others and aggregates the report.
-- `gpa-query-telemetry` - gcx queries (Mimir/Loki/Tempo/Pyroscope) to find WHERE it is slow;
-  asks the user for service/window/datasource UIDs. Stage: COLLECT.
-- `gpa-codebase-scanner` - maps telemetry signals to concrete code paths (file:line, hot
-  loop/alloc), enriching hotspots. Stage: EXTRACT.
-- `gpa-hypothesis-former` - one per hotspot; forms a testable hypothesis from code + catalog +
-  signal. Stage: HYPOTHESIZE.
+- `gpa-query-telemetry` - finds WHERE it is slow (Tempo/Pyroscope via gcx, or local pprof when
+  gcx is absent); asks the user for service/window/UIDs or a target function. Stage: COLLECT.
+- `gpa-analyst` - one per candidate hotspot; locates it in source, understands why it is hot,
+  and forms a testable hypothesis (or null). Stages: EXTRACT + HYPOTHESIZE.
 - `gpa-validation` - authors benchmark, applies one change, runs the gate; sets `proved` /
   `rejected` / `need_more_data`. Stage: VALIDATE.
 - `gpa-critic` - structurally distinct reflexion pass; reviews each `proved` change for
@@ -103,7 +100,7 @@ benchmark that can prove it. Rules:
 - If no benchmark exercises the symbol, set `benchmark.needs_authoring: true` and name the
   package; you will author it in the worktree during validation.
 - Prefer low-`risk` patterns first. Skip anything in generated/vendored code.
-- Delegate the per-symbol analysis to parallel `gpa-hypothesis-former` agents (one per
+- Delegate the per-symbol analysis to parallel `gpa-analyst` agents (one per candidate
   hotspot); collect their structured objects into the array, dropping nulls.
 
 ## Step 4 - VALIDATE (tools measure, you edit) - one hypothesis at a time
