@@ -106,24 +106,8 @@ func runBenchVerdict(id string) error {
 	}
 
 	info("interleaved benchmarking: %d rounds of %s", benchCount, hyp.Benchmark.Name)
-	var baseOut, candOut strings.Builder
-	benchArgs := []string{"-test.run=^$", "-test.bench=^" + hyp.Benchmark.Name + "$", "-test.benchmem", "-test.count=1"}
-	for i := 0; i < benchCount; i++ {
-		b, _, _ := run(pkgDir, baselineBin, benchArgs...)
-		baseOut.WriteString(b)
-		c, _, _ := run(pkgDir, candidateBin, benchArgs...)
-		candOut.WriteString(c)
-	}
-	baseTxt := filepath.Join(runDir, "baseline.txt")
-	candTxt := filepath.Join(runDir, "candidate.txt")
-	_ = os.WriteFile(baseTxt, []byte(baseOut.String()), 0o644)
-	_ = os.WriteFile(candTxt, []byte(candOut.String()), 0o644)
-
-	csv, _, _ := run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, candTxt)
-	table, _, _ := run("", "benchstat", "-alpha", alpha, baseTxt, candTxt)
-	_ = os.WriteFile(filepath.Join(runDir, "benchstat.csv"), []byte(csv), 0o644)
+	csv, table := interleaveBenchstat(pkgDir, baselineBin, candidateBin, hyp.Benchmark.Name, benchCount, runDir)
 	bsFile := filepath.Join(runDir, "benchstat.txt")
-	_ = os.WriteFile(bsFile, []byte(table), 0o644)
 
 	label := proofLabel(hyp.Metric)
 	if label == "" {
@@ -175,6 +159,30 @@ func proofLabel(metric string) string {
 		return "allocs/op"
 	}
 	return ""
+}
+
+// interleaveBenchstat runs two compiled test binaries alternately (run-by-run) so
+// time-correlated machine noise hits both equally, then compares them with benchstat. Shared by
+// bench-verdict (HEAD-pristine vs edited) and bench-regression (base ref vs head ref). Returns
+// the benchstat CSV and the human table, and writes baseline.txt/candidate.txt/benchstat.* in runDir.
+func interleaveBenchstat(pkgDir, baseBin, headBin, bench string, rounds int, runDir string) (csv, table string) {
+	var baseOut, headOut strings.Builder
+	args := []string{"-test.run=^$", "-test.bench=^" + bench + "$", "-test.benchmem", "-test.count=1"}
+	for i := 0; i < rounds; i++ {
+		b, _, _ := run(pkgDir, baseBin, args...)
+		baseOut.WriteString(b)
+		c, _, _ := run(pkgDir, headBin, args...)
+		headOut.WriteString(c)
+	}
+	baseTxt := filepath.Join(runDir, "baseline.txt")
+	headTxt := filepath.Join(runDir, "candidate.txt")
+	_ = os.WriteFile(baseTxt, []byte(baseOut.String()), 0o644)
+	_ = os.WriteFile(headTxt, []byte(headOut.String()), 0o644)
+	csv, _, _ = run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, headTxt)
+	table, _, _ = run("", "benchstat", "-alpha", alpha, baseTxt, headTxt)
+	_ = os.WriteFile(filepath.Join(runDir, "benchstat.csv"), []byte(csv), 0o644)
+	_ = os.WriteFile(filepath.Join(runDir, "benchstat.txt"), []byte(table), 0o644)
+	return csv, table
 }
 
 // parseBenchstat reads benchstat `-format csv` and returns ("vs base", p) for one metric.

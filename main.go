@@ -44,6 +44,7 @@ var cli struct {
 	TargetDiff      targetDiffCmd      `cmd:"" help:"Target a PR / local diff: changed funcs become the candidate set"`
 	BenchBaseline   benchBaselineCmd   `cmd:"" help:"Create worktree + compile the pristine baseline binary"`
 	BenchVerdict    benchVerdictCmd    `cmd:"" help:"Tests + interleaved benchmark + benchstat gate (PROVED/REJECTED)"`
+	BenchRegression benchRegressionCmd `cmd:"" help:"Compare a benchmark base-vs-head for a regression (no edit)"`
 	Validate        validateCmd        `cmd:"" help:"Baseline, apply a patch, then verdict (non-LLM path)"`
 	ValidateAll     validateAllCmd     `cmd:"" help:"Set up baselines for every hypothesis"`
 	Report          reportCmd          `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
