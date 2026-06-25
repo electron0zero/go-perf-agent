@@ -38,11 +38,14 @@ func (c *collectProfilesCmd) Run() error {
 		timeFlags = []string{"--from", f, "--to", t}
 	}
 
-	for _, kind := range []string{"cpu", "alloc"} {
-		pt := cpuPT
-		if kind == "alloc" {
-			pt = allocPT
-		}
+	// cpu (time), alloc (churn), inuse (resident heap - the OOM signal). hotspots ranks each
+	// metric separately, so collecting all three keeps memory-residency a first-class signal.
+	for _, k := range []struct{ kind, pt string }{
+		{"cpu", cpuPT},
+		{"alloc", allocPT},
+		{"inuse", inusePT},
+	} {
+		kind, pt := k.kind, k.pt
 		out := filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.leaderboard.json", safeServiceName(c.Service), kind))
 		info("pyroscope %s flamegraph -> %s", kind, out)
 		// query (flamegraph), not series --top: series ranks label groups, so a fixed

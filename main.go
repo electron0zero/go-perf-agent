@@ -26,6 +26,7 @@ var (
 	alpha      = env("GPA_ALPHA", "0.05")     // benchstat significance threshold
 	cpuPT      = env("GPA_CPU_PT", "process_cpu:cpu:nanoseconds:cpu:nanoseconds")
 	allocPT    = env("GPA_ALLOC_PT", "memory:alloc_space:bytes:space:bytes")
+	inusePT    = env("GPA_INUSE_PT", "memory:inuse_space:bytes:space:bytes") // resident heap - the OOM signal
 	pyroDS     = env("GPA_PYRO_DS", "")
 	tempoDSUID = env("GPA_TEMPO_DS_UID", "")
 
@@ -140,7 +141,8 @@ func fileExists(p string) bool {
 }
 
 // benchPkgRel normalizes a benchmark pkg to a worktree-relative dir to cd into: a trailing
-// /... is a valid `go test` pattern but not a real directory.
+// "..." is a valid `go test` wildcard but not a real directory ("./..." -> module root "").
 func benchPkgRel(pkg string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(pkg, "./"), "/...")
+	p := strings.TrimPrefix(pkg, "./")
+	return strings.TrimRight(strings.TrimSuffix(p, "..."), "/")
 }
