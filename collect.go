@@ -130,11 +130,12 @@ func flamegraphLeaderboard(stdout string, limit int) ([]leaderboardRow, error) {
 // collect-traces: gcx has no `tempo query`, so we go through the datasource proxy. Traces
 // localize the slow operation (secondary signal).
 type collectTracesCmd struct {
-	Service string `help:"Service name (for the default TraceQL and output name)"`
-	Query   string `help:"Explicit TraceQL (default: slow spans for the service)"`
-	Window  string `default:"1h" help:"Time window, e.g. 1h or 30m"`
-	DSUID   string `name:"ds-uid" help:"Tempo datasource UID (or GPA_TEMPO_DS_UID)"`
-	Limit   int    `default:"20" help:"Max traces"`
+	Service   string `help:"resource.service.name to match (for self-observability traces this may carry a deployment prefix, e.g. tempo-querier, not just querier)"`
+	Namespace string `help:"Scope the default query to one cluster via resource.namespace; omit to search every cluster the datasource sees"`
+	Query     string `help:"Explicit TraceQL (overrides the --service/--namespace default)"`
+	Window    string `default:"1h" help:"Time window, e.g. 1h or 30m"`
+	DSUID     string `name:"ds-uid" help:"Tempo datasource UID (or GPA_TEMPO_DS_UID)"`
+	Limit     int    `default:"20" help:"Max traces"`
 }
 
 func (c *collectTracesCmd) Run() error {
@@ -149,13 +150,27 @@ func (c *collectTracesCmd) Run() error {
 
 	q := c.Query
 	if q == "" {
-		q = fmt.Sprintf(`{ resource.service.name = "%s" && duration > 500ms }`, c.Service)
+		// build the selector from the parts that are set, so a multi-cluster backend can be
+		// scoped to one namespace instead of returning every cluster's traces.
+		var sel []string
+		if c.Service != "" {
+			sel = append(sel, fmt.Sprintf(`resource.service.name = "%s"`, c.Service))
+		}
+		if c.Namespace != "" {
+			sel = append(sel, fmt.Sprintf(`resource.namespace = "%s"`, c.Namespace))
+		}
+		sel = append(sel, "duration > 500ms")
+		q = "{ " + strings.Join(sel, " && ") + " }"
 	}
 	now := time.Now().Unix()
 	since := now - int64(windowSeconds(c.Window))
 	path := fmt.Sprintf("/api/datasources/proxy/uid/%s/api/search?q=%s&limit=%d&start=%d&end=%d",
 		uid, url.QueryEscape(q), c.Limit, since, now)
-	out := filepath.Join(gpaDir, "traces", nameOr(c.Service, "search")+".json")
+	name := nameOr(c.Service, "search")
+	if c.Namespace != "" { // keep per-namespace outputs distinct so probing doesn't overwrite
+		name += "-" + c.Namespace
+	}
+	out := filepath.Join(gpaDir, "traces", safeServiceName(name)+".json")
 	info("tempo search via proxy -> %s", out)
 	info("  query: %s", q)
 
