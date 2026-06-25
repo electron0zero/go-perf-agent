@@ -138,3 +138,9 @@ func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
+
+// benchPkgRel normalizes a benchmark pkg to a worktree-relative dir to cd into: a trailing
+// /... is a valid `go test` pattern but not a real directory.
+func benchPkgRel(pkg string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(pkg, "./"), "/...")
+}

@@ -49,7 +49,7 @@ func runBenchBaseline(id string) (string, error) {
 		return wt, nil
 	}
 
-	pkgDir := filepath.Join(wt, strings.TrimPrefix(hyp.Benchmark.Pkg, "./"))
+	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
 	info("compiling baseline binary for %s (%s)", hyp.Benchmark.Name, hyp.Benchmark.Pkg)
 	if _, stderr, err := run(pkgDir, "go", "test", "-c", "-o", filepath.Join(arun, "baseline.test"), "."); err != nil {
 		return "", fmt.Errorf("baseline compile failed for %s: %s", id, stderr)
@@ -137,7 +137,7 @@ func runBenchVerdict(id string) error {
 	wt := filepath.Join(gpaDir, "wt", id)
 	runDir := filepath.Join(gpaDir, "runs", id)
 	arun := mustAbs(runDir)
-	pkgDir := filepath.Join(wt, strings.TrimPrefix(hyp.Benchmark.Pkg, "./"))
+	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
 	baselineBin := filepath.Join(arun, "baseline.test")
 	if !fileExists(wt) {
 		return fmt.Errorf("no worktree for %s; run bench-baseline first", id)

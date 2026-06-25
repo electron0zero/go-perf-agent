@@ -35,7 +35,7 @@ func (c *benchRegressionCmd) Run() error {
 	runDir := filepath.Join(gpaDir, "runs", c.ID)
 	_ = os.MkdirAll(runDir, 0o755)
 	arun := mustAbs(runDir)
-	rel := strings.TrimPrefix(c.Pkg, "./")
+	rel := benchPkgRel(c.Pkg)
 
 	baseBin, err := buildBenchAt(c.Base, c.ID+"-base", rel, filepath.Join(arun, "base.test"))
 	if err != nil {
