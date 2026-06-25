@@ -56,7 +56,8 @@ func (c *reportCmd) Run() error {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("### %s\n\n```\n%s\n```\n", v.ID, strings.TrimRight(v.Verdict.Benchstat, "\n")))
-		b.WriteString(fmt.Sprintf("Worktree: `%s` (review the diff with `git -C %s diff`)\n\n", v.Verdict.Worktree, v.Verdict.Worktree))
+		// diff HEAD (not plain diff) so the staged, newly-authored benchmark is included in the patch
+		b.WriteString(fmt.Sprintf("Worktree: `%s` (review the full patch, incl. the authored benchmark, with `git -C %s diff HEAD`)\n\n", v.Verdict.Worktree, v.Verdict.Worktree))
 	}
 
 	out := filepath.Join(gpaDir, "report.md")

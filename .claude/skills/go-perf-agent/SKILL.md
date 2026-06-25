@@ -113,10 +113,15 @@ go-perf-agent bench-baseline <id>        # creates .go-perf-agent/wt/<id> worktr
 
 - If it prints `NEEDS_BENCHMARK: ...`, write a benchmark (and a correctness `Test...` if none
   covers the symbol) in the worktree package, then re-run `bench-baseline`. The benchmark must
-  exercise the hot path at a representative size and call `b.ReportAllocs()`. If you cannot
-  write a faithful benchmark, mark the hypothesis `need_more_data`.
+  follow the existing benchmark style in that package (read the package's `*_test.go` first and
+  match its conventions), exercise the hot path at a representative size, and call
+  `b.ReportAllocs()`. If you cannot write a faithful benchmark, mark the hypothesis
+  `need_more_data`.
 - Apply EXACTLY ONE change in `.go-perf-agent/wt/<id>/` - the transform from the pattern. Do not
   batch changes; the verdict must be attributable. Keep the diff minimal.
+- After the verdict, stage the worktree (`git -C .go-perf-agent/wt/<id> add -A`) so the authored
+  benchmark+test ship inside the patch – an untracked benchmark is invisible to `git diff`, and a
+  patch without it can't be re-run to prove the gain.
 
 ```bash
 go-perf-agent bench-verdict <id>         # tests -> interleaved A/B benchmark -> benchstat gate
@@ -143,10 +148,13 @@ generated/vendored code, or the signal is ambiguous. Surface the specific blocke
 go-perf-agent report                     # -> .go-perf-agent/report.md
 ```
 
-Summarize for the user: proved hypotheses (with benchstat deltas and worktree paths to inspect
-the diff: `git -C .go-perf-agent/wt/<id> diff`), rejected ones with the reason, and
-need_more_data ones with what input you need. Proved worktrees are left intact so the user can
-review and cherry-pick.
+Summarize for the user: proved hypotheses (with worktree paths), rejected ones with the reason,
+and need_more_data ones with what input you need. For each proved finding, SHARE THE PROOF: the
+full benchstat table from the microbenchmark runs (baseline vs candidate, all metrics + p) AND a
+patch that includes the authored benchmark - inspect/extract it with
+`git -C .go-perf-agent/wt/<id> diff HEAD` (plain `git diff` omits the staged-but-new benchmark
+file). A finding handed back without its benchmark and its numbers is not reviewable. Proved
+worktrees are left intact (and staged) so the user can review and cherry-pick.
 
 ## Step 7 - VERIFY IN PRODUCTION (always state this)
 

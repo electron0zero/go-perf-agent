@@ -24,6 +24,10 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
      re-run `bench-baseline <id>`.
 
 2. Author a benchmark + correctness test (only if needed). In `.go-perf-agent/wt/<id>/<pkg>`:
+   - FOLLOW THE CODEBASE STYLE. First read the existing `*_test.go` benchmarks in this package
+     (or the nearest package that has them) and mirror their conventions: table-driven cases /
+     `b.Run` subtests, naming, fixture/setup helpers, build tags, how inputs are constructed.
+     The authored benchmark must look like it belongs in the codebase and follow the same patterns.
    - Write a `Benchmark<Name>` that exercises the hot path at a REPRESENTATIVE size - use the
      scanner's `representative_input` (derived from real traces), not a toy size. Call
      `b.ReportAllocs()`. Use a package-level sink to defeat dead-code elimination.
@@ -53,11 +57,20 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
    `GPA_BENCH_COUNT`; if still inconclusive, set `need_more_data` (the local signal is too weak;
    it needs production measurement to decide).
 
+6. Make the worktree a self-contained patch. The benchmark/test you authored is a NEW (untracked)
+   file. the change handed back SHOULD include the proof.
+   Stage everything so the patch carries the source change AND the benchmark together:
+   ```bash
+   git -C .go-perf-agent/wt/<id> add -A      # .go-perf-agent is gitignored; only your edit + new tests get staged
+   ```
+   The complete, reviewable patch is then `git -C .go-perf-agent/wt/<id> diff HEAD`.
+
 ## Output
 
-Return: the hypothesis id, the final status (`proved`|`rejected`|`need_more_data`), the
-benchstat delta on the proof metric, and a one-line reason. The verdict JSON is the source of
-truth; your return mirrors it.
+Return: the hypothesis id, the final status (`proved`|`rejected`|`need_more_data`), a one-line
+reason, AND the full benchstat table (all metrics, baseline vs candidate, with p-values) so the
+gain is provable from your message - not just the headline delta. Name the authored benchmark and
+confirm it is staged in the patch. The verdict JSON is the source of truth; your return mirrors it.
 
 ## Rules
 
