@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -51,6 +54,12 @@ func runBenchBaseline(id string) (string, error) {
 	if _, stderr, err := run(pkgDir, "go", "test", "-c", "-o", filepath.Join(arun, "baseline.test"), "."); err != nil {
 		return "", fmt.Errorf("baseline compile failed for %s: %s", id, stderr)
 	}
+	// snapshot the test files now (after any benchmark authoring) so bench-verdict can detect a
+	// candidate that later edits the benchmark/test to game the result.
+	_ = os.WriteFile(filepath.Join(runDir, "baseline-tests.sha"), []byte(testFilesHash(pkgDir)), 0o644)
+	if len(hyp.Evidence) == 0 || string(hyp.Evidence) == "null" {
+		info("warning: hypothesis %s has no evidence - it should cite a real signal (profile/trace)", id)
+	}
 	// smoke-run once so the user sees the starting numbers
 	if out, _, err := run(pkgDir, filepath.Join(arun, "baseline.test"),
 		"-test.run=^$", "-test.bench=^"+hyp.Benchmark.Name+"$", "-test.benchmem", "-test.count=1"); err == nil {
@@ -62,6 +71,52 @@ func runBenchBaseline(id string) (string, error) {
 	}
 	fmt.Println(wt)
 	return wt, nil
+}
+
+// testFilesHash hashes the package's *_test.go files so we can detect a candidate that edits the
+// benchmark or correctness test it is being judged by.
+func testFilesHash(pkgDir string) string {
+	matches, _ := filepath.Glob(filepath.Join(pkgDir, "*_test.go"))
+	sort.Strings(matches)
+	h := sha256.New()
+	for _, m := range matches {
+		b, _ := os.ReadFile(m)
+		h.Write([]byte(m))
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// structuralGate enforces, in code (not prompt), that the candidate change is honest: it must
+// not modify the benchmark/test being judged, and must stay inside scope. Returns a reject
+// reason, or "" if the change is structurally allowed.
+func structuralGate(id, wt, pkgDir, runDir string) string {
+	if sha, err := os.ReadFile(filepath.Join(runDir, "baseline-tests.sha")); err == nil {
+		if testFilesHash(pkgDir) != strings.TrimSpace(string(sha)) {
+			return "candidate modified the benchmark/test files - cannot change the ruler"
+		}
+	}
+	sc := loadScope()
+	if sc == nil {
+		return ""
+	}
+	out, _, _ := run(wt, "git", "status", "--porcelain")
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		path := strings.TrimSpace(line[3:])
+		if i := strings.Index(path, " -> "); i >= 0 { // rename: take the new path
+			path = path[i+4:]
+		}
+		if !strings.HasSuffix(path, ".go") {
+			continue
+		}
+		if !inScope(filepath.Dir(path), sc) {
+			return "candidate edited out-of-scope file: " + path
+		}
+	}
+	return ""
 }
 
 type benchVerdictCmd struct {
@@ -89,6 +144,12 @@ func runBenchVerdict(id string) error {
 	}
 	if !fileExists(baselineBin) {
 		return fmt.Errorf("no baseline binary for %s; run bench-baseline first", id)
+	}
+
+	// structural gate: refuse a dishonest change (gamed ruler / out-of-scope edit) before measuring
+	if reason := structuralGate(id, wt, pkgDir, runDir); reason != "" {
+		info("  REJECTED (structural): %s", reason)
+		return writeVerdict(id, wt, false, false, "", "", "", reason)
 	}
 
 	// correctness gate first - a faster-but-wrong change is a rejection, not a win
