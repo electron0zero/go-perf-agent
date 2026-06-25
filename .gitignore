@@ -1,0 +1,18 @@
+# go-perf-agent runtime state (written into each target Go module)
+.go-perf-agent/
+
+# the built binary (this module is named go-perf-agent)
+/go-perf-agent
+
+# go build / profiling artifacts
+*.test
+*.prof
+*.pb.gz
+
+# editor / OS
+.idea/
+.DS_Store
+
+# LLM local files
+DECISIONS.md
+PLAN.md
