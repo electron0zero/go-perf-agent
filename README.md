@@ -1,15 +1,16 @@
 # go-perf-agent
 
-An LLM-assisted agent that audits a Go codebase for performance and proposes optimizations that
-are proven, not guessed.
+An LLM-assisted agent and tooling that audits a Go codebase for performance and proposes optimizations in go codebases.
 
-It pulls real data - traces from Grafana Tempo and profiles from Grafana Pyroscope (via the
-`gcx` CLI), or a local `go pprof` profile when Grafana is not set up - ranks the hot code, forms
-hypotheses against a catalog of common Go performance patterns, and tests each one in an isolated
-git worktree with benchmarks. A change is only reported as proven when `benchstat` says so.
+It can pull data like traces from Grafana Tempo and profiles from Grafana Pyroscope (via the `gcx` CLI),
+or a local `go pprof` profile when Tempo or Pyroscope is not set up.
 
-The engine is a single Go binary (kong CLI, same subcommand pattern as `tempo-cli`). The loop is
-a Claude Code skill plus four agents. Works on any Go module.
+With the data, it ranks the hot code, forms hypotheses against by using a catalog of common Go performance patterns,
+and tests each one in an isolated git worktree with benchmarks. 
+
+A change is only reported as proven when `benchstat` says so.
+
+The tool is a single Go binary, and the core loop is a Claude Code skill plus four agents for the steps
 
 Why it exists: performance work should start from a real signal and end with a measured result.
 The agent grounds every suggestion in a profile or trace and gates every change behind a
@@ -21,25 +22,48 @@ speculative advice.
 The skill orchestrates; four agents do the reasoning; the Go binary does the deterministic work.
 They connect through files under `.go-perf-agent/` (the source of truth), not direct messages.
 
-```
-USER ─▶ skill (orchestrator)
- │
- ├─ COLLECT    (gpa-query-telemetry)  gcx LGTM  OR  local pprof ─┐   core: codebase-wide
- │             target-diff (PR / local diff) ───────────────────┤   alt: a diff
- │                                          [hotspots] ──▶ {hotspots.json}   ranked candidates
- │                                                                  │
- ├─ HYPOTHESIZE (gpa-analyst × N, parallel) ───────────────▶ {hypotheses.json}
- │                                                                  │
- ├─ VALIDATE    (gpa-validation × N, each its own worktree)         │
- │     [bench-baseline] ─▶ ONE change ─▶ [bench-verdict]            ▼
- │     gates: structural · correctness · benchstat ──▶ {runs/<id>/verdict.json}
- │                                                                  │  proved|rejected|need_more_data
- ├─ CRITIQUE    (gpa-critic, proved only — can only downgrade)      │
- │                                                                  ▼
- └─ REPORT      [report] ─▶ {report.md} ─▶ USER ships behind a flag ─▶ verify in prod
+```mermaid
+flowchart TD
+    user([USER]) --> skill[["skill (orchestrator)"]]
 
-(agent) = LLM reasoning   [cmd] = Go binary   {file} = .go-perf-agent/ filestore
+    %% COLLECT + EXTRACT - codebase-wide telemetry is the core; a diff is the alternate
+    skill --> qt(["gpa-query-telemetry"])
+    skill -. alt .-> diff["target-diff<br/>PR / local diff"]
+    qt -->|"gcx LGTM or local pprof"| prof[/"profiles/"/]
+    prof --> hsCmd["hotspots"]
+    hsCmd --> hs[("hotspots.json<br/>ranked candidates")]
+    diff --> hs
+
+    %% HYPOTHESIZE - one analyst per candidate, in parallel
+    hs --> an(["gpa-analyst x N"])
+    an --> hyp[("hypotheses.json")]
+
+    %% VALIDATE - one validation per hypothesis, each in its own worktree
+    hyp --> val(["gpa-validation x N"])
+    val --> bb["bench-baseline"]
+    bb --> edit["ONE change in wt/&lt;id&gt;"]
+    edit --> bv["bench-verdict"]
+    bv --> gates{"gates: structural ·<br/>correctness · benchstat"}
+    gates --> verdict[("runs/&lt;id&gt;/verdict.json<br/>proved | rejected | need_more_data")]
+
+    %% CRITIQUE - proved only, can only downgrade
+    verdict -->|proved| critic(["gpa-critic<br/>downgrade-only"])
+    critic --> report["report"]
+    report --> rep[("report.md")]
+    rep --> ship([USER ships behind a flag])
+    ship --> prod([verify in prod])
+
+    classDef agent fill:#dae8fc,stroke:#6c8ebf,color:#000;
+    classDef cmd fill:#d5e8d4,stroke:#82b366,color:#000;
+    classDef file fill:#fff2cc,stroke:#d6b656,color:#000;
+    class qt,an,val,critic agent;
+    class diff,hsCmd,bb,bv,report cmd;
+    class prof,hs,hyp,verdict,rep file;
 ```
+
+Blue = LLM agent · green = Go binary command · yellow = `.go-perf-agent/` file (how stages
+connect). `bench-regression` (base-vs-head) and `eval` (golden scenarios) are separate entry
+points, not shown.
 
 ## How to use
 
