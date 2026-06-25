@@ -66,6 +66,14 @@ type Verdict struct {
 	Status  string         `json:"status"`
 	Reason  string         `json:"reason,omitempty"`  // top-level reason for need_more_data placeholders
 	Verdict *VerdictDetail `json:"verdict,omitempty"` // filled by the gate
+	Critic  *CriticReview  `json:"critic,omitempty"`  // filled by the reflexion critic pass
+}
+
+// CriticReview records a structurally-distinct critique. The critic may only downgrade a PROVED
+// (semantic/behavior concerns the numeric gate cannot see); it can never promote a rejection.
+type CriticReview struct {
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason"`
 }
 
 // ---- store helpers ----------------------------------------------------------------------

@@ -50,11 +50,17 @@ from the target Go module root.
    multiple agent calls. Each writes `.go-perf-agent/runs/<id>/verdict.json` with status
    `proved` | `rejected` | `need_more_data`.
 
-6. REPORT. `go-perf-agent report`. Then summarize for the user: proved (with benchstat deltas
+6. CRITIQUE. For each `proved` verdict, spawn a `gpa-critic` agent - a structurally distinct pass
+   (not the same agent that validated) that reviews the change for behavior-preservation and
+   benchmark-gaming the numeric gate cannot see. It records `go-perf-agent critic <id>` (sound)
+   or `--reject` (downgrades to need_more_data). A win only survives if both the gate and the
+   critic pass. Run these in parallel too.
+
+7. REPORT. `go-perf-agent report`. Then summarize for the user: proved (with benchstat deltas
    and the worktree path to inspect: `git -C .go-perf-agent/wt/<id> diff`), rejected (reasons),
    and need_more_data (what input you need from them).
 
-7. ALWAYS close with the production-validation caveat: these are LLM-assisted hypotheses; a
+8. ALWAYS close with the production-validation caveat: these are LLM-assisted hypotheses; a
    proved verdict is a local-benchmark win, not proof. Tell the user to ship each proved change
    behind a flag, re-pull the SAME telemetry after rollout, and confirm the hot symbol's weight
    actually dropped with no regression elsewhere.
