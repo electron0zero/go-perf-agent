@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,25 +44,81 @@ func (c *collectProfilesCmd) Run() error {
 			pt = allocPT
 		}
 		out := filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.leaderboard.json", c.Service, kind))
-		info("pyroscope %s leaderboard -> %s", kind, out)
-		gcxArgs := []string{"datasources", "pyroscope", "series"}
+		info("pyroscope %s flamegraph -> %s", kind, out)
+		// query (flamegraph), not series --top: series ranks label groups, so a fixed
+		// service_name selector yields one row, not a per-function breakdown.
+		gcxArgs := []string{"datasources", "pyroscope", "query"}
 		if pyroDS != "" {
 			gcxArgs = append(gcxArgs, pyroDS)
 		}
 		gcxArgs = append(gcxArgs, sel, "--profile-type", pt)
 		gcxArgs = append(gcxArgs, timeFlags...)
-		gcxArgs = append(gcxArgs, "--top", "--limit", strconv.Itoa(c.Limit), "-o", "json", "-q")
+		gcxArgs = append(gcxArgs, "-o", "json")
 		stdout, stderr, err := run("", "gcx", gcxArgs...)
 		if err != nil {
 			fmt.Fprint(os.Stderr, stderr)
-			return fmt.Errorf("pyroscope query failed (run 'gcx auth login' if the session expired)")
+			return fmt.Errorf("pyroscope query failed (run 'gcx auth login' if the session expired): %w", err)
 		}
-		if err := os.WriteFile(out, []byte(stdout), 0o644); err != nil {
+		rows, err := flamegraphLeaderboard(stdout, c.Limit)
+		if err != nil {
+			return fmt.Errorf("%s %s: %w", c.Service, kind, err)
+		}
+		if err := writeJSON(out, rows); err != nil {
 			return err
 		}
 	}
 	fmt.Println(filepath.Join(gpaDir, "profiles"))
 	return nil
+}
+
+// flamebearer is the flamegraph shape gcx pyroscope query returns: names indexed by node, and
+// levels of [offset,total,self,nameIdx,...] quads encoded as strings.
+type flamebearer struct {
+	Flamegraph struct {
+		Names  []string `json:"names"`
+		Levels []struct {
+			Values []string `json:"values"`
+		} `json:"levels"`
+	} `json:"flamegraph"`
+}
+
+type leaderboardRow struct {
+	Function string  `json:"function"`
+	Value    float64 `json:"value"`
+}
+
+// flamegraphLeaderboard sums self weight per function across the flamegraph - the code-level
+// signal hotspots ranks. Returns the top `limit` functions by self weight.
+func flamegraphLeaderboard(stdout string, limit int) ([]leaderboardRow, error) {
+	var fb flamebearer
+	if err := json.Unmarshal([]byte(stdout), &fb); err != nil {
+		return nil, fmt.Errorf("parse flamegraph json: %w", err)
+	}
+	names := fb.Flamegraph.Names
+	if len(names) == 0 {
+		return nil, fmt.Errorf("flamegraph has no functions (empty profile for this service/window?)")
+	}
+	self := make([]float64, len(names))
+	for _, lvl := range fb.Flamegraph.Levels {
+		for i := 0; i+3 < len(lvl.Values); i += 4 {
+			s, _ := strconv.ParseFloat(lvl.Values[i+2], 64)
+			ni, _ := strconv.Atoi(lvl.Values[i+3])
+			if ni >= 0 && ni < len(self) {
+				self[ni] += s
+			}
+		}
+	}
+	var rows []leaderboardRow
+	for i, name := range names {
+		if self[i] > 0 && name != "total" && name != "other" {
+			rows = append(rows, leaderboardRow{Function: name, Value: self[i]})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Value > rows[j].Value })
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
 }
 
 // collect-traces: gcx has no `tempo query`, so we go through the datasource proxy. Traces
