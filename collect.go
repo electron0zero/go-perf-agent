@@ -43,7 +43,7 @@ func (c *collectProfilesCmd) Run() error {
 		if kind == "alloc" {
 			pt = allocPT
 		}
-		out := filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.leaderboard.json", c.Service, kind))
+		out := filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.leaderboard.json", safeServiceName(c.Service), kind))
 		info("pyroscope %s flamegraph -> %s", kind, out)
 		// query (flamegraph), not series --top: series ranks label groups, so a fixed
 		// service_name selector yields one row, not a per-function breakdown.
@@ -69,6 +69,12 @@ func (c *collectProfilesCmd) Run() error {
 	}
 	fmt.Println(filepath.Join(gpaDir, "profiles"))
 	return nil
+}
+
+// gcx service_name values can contain a slash (e.g. "namespace/component"); flatten it so
+// outputs stay flat in profiles/ instead of spawning a subdir.
+func safeServiceName(s string) string {
+	return strings.NewReplacer("/", "-", " ", "_").Replace(s)
 }
 
 // flamebearer is the flamegraph shape gcx pyroscope query returns: names indexed by node, and
