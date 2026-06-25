@@ -9,12 +9,37 @@ hypotheses against a catalog of common Go performance patterns, and tests each o
 git worktree with benchmarks. A change is only reported as proven when `benchstat` says so.
 
 The engine is a single Go binary (kong CLI, same subcommand pattern as `tempo-cli`). The loop is
-a Claude Code skill plus five agents. Works on any Go module.
+a Claude Code skill plus four agents. Works on any Go module.
 
 Why it exists: performance work should start from a real signal and end with a measured result.
 The agent grounds every suggestion in a profile or trace and gates every change behind a
 statistical benchmark, so you get a short list of changes worth shipping instead of a wall of
 speculative advice.
+
+## How it connects
+
+The skill orchestrates; four agents do the reasoning; the Go binary does the deterministic work.
+They connect through files under `.go-perf-agent/` (the source of truth), not direct messages.
+
+```
+USER ─▶ skill (orchestrator)
+ │
+ ├─ COLLECT    (gpa-query-telemetry)  gcx LGTM  OR  local pprof ─┐   core: codebase-wide
+ │             target-diff (PR / local diff) ───────────────────┤   alt: a diff
+ │                                          [hotspots] ──▶ {hotspots.json}   ranked candidates
+ │                                                                  │
+ ├─ HYPOTHESIZE (gpa-analyst × N, parallel) ───────────────▶ {hypotheses.json}
+ │                                                                  │
+ ├─ VALIDATE    (gpa-validation × N, each its own worktree)         │
+ │     [bench-baseline] ─▶ ONE change ─▶ [bench-verdict]            ▼
+ │     gates: structural · correctness · benchstat ──▶ {runs/<id>/verdict.json}
+ │                                                                  │  proved|rejected|need_more_data
+ ├─ CRITIQUE    (gpa-critic, proved only — can only downgrade)      │
+ │                                                                  ▼
+ └─ REPORT      [report] ─▶ {report.md} ─▶ USER ships behind a flag ─▶ verify in prod
+
+(agent) = LLM reasoning   [cmd] = Go binary   {file} = .go-perf-agent/ filestore
+```
 
 ## How to use
 
@@ -33,7 +58,7 @@ Run it as an agent (recommended): load this repo's `.claude/` (run Claude Code f
 copy/symlink `.claude/skills/go-perf-agent` and `.claude/agents/gpa-*.md` into the target repo
 or `~/.claude/`), then invoke the `go-perf-agent` skill from the target module root. The skill
 asks you for the codebase path, what is in/out of scope, and the service or target function, then
-drives the loop and writes `.go-perf-agent/report.md`.
+drives the loop, and writes `.go-perf-agent/report.md`.
 
 Or drive the stages by hand from the target module root:
 
@@ -54,33 +79,18 @@ PROVED/REJECTED/NEED_MORE_DATA gate, and configuration.
 ## When to use
 
 Good fits:
-- You run a Go service with Pyroscope/Tempo telemetry and want code-level wins backed by real load.
+- You run a Go service with Pyroscope/Tempo telemetry and want code-level perf wins backed by real data.
 - You have a hot package or function (or a local profile) and want hypotheses tested, not just listed.
 - You want to scope an audit to part of a large repo and keep it off vendored/generated code.
 
 Not a fit:
-- Micro-tuning with no signal - the agent refuses to invent hotspots.
+- Micro-tuning with no signal
 - A replacement for production validation - a local benchmark win is a starting point, not proof.
-
-## Acknowledgements
-
-Built on the Grafana LGTM stack and Pyroscope, the [`gcx`](https://github.com/grafana/gcx) CLI,
-Go's `pprof` and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), and
-[`alecthomas/kong`](https://github.com/alecthomas/kong). The CLI mirrors the subcommand pattern
-of `grafana/tempo`'s `cmd/tempo-cli`.
-
-## Credits
-
-The Go performance pattern catalog is built from Dave Cheney's High Performance Go Workshop and
-Bryan Boreham's fork:
-
-- https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
-- https://github.com/bboreham/high-performance-go-workshop
 
 ## Warnings & gotchas
 
 - LLM-assisted: every finding is a hypothesis. A PROVED verdict is a local-benchmark win, not
-  truth - always ship behind a flag and re-check the same telemetry in production before trusting it.
+  truth. always re-check the same telemetry in production before trusting it.
 - Local benchmarks can mislead: production hardware, input distributions, load, and concurrency
   differ. The agent interleaves baseline/candidate runs to cancel machine noise, but that does
   not substitute for a production check.
@@ -94,3 +104,15 @@ Bryan Boreham's fork:
 - External tools must be on PATH: `go`, `benchstat`, `git`, and `gcx` (for the LGTM path).
 - Benchmark results are only as good as the machine. A noisy laptop widens confidence intervals
   and pushes borderline wins to `need_more_data`; run on an idle machine for tight results.
+
+## Acknowledgements
+
+Built on the Grafana LGTM stack and Pyroscope, the [`gcx`](https://github.com/grafana/gcx) CLI,
+Go's `pprof` and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), and
+[`alecthomas/kong`](https://github.com/alecthomas/kong).
+
+## Credits
+
+The Go performance pattern catalog is built from Dave Cheney's High Performance Go Workshop and  Bryan Boreham's workshop code fork:
+- https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
+- https://github.com/bboreham/high-performance-go-workshop

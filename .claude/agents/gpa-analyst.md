@@ -1,6 +1,6 @@
 ---
 name: gpa-analyst
-description: Given one hot symbol, locates it in source, understands why it is hot, and forms a single testable Go performance hypothesis (or returns null). Combines code-path mapping and pattern matching. Read-only on source. Spawn one per candidate hotspot, in parallel.
+description: A per-hotspot worker in the codebase-wide scan. Given one candidate hot symbol (from a telemetry-ranked scan of the whole codebase - the core path - or from a diff), it locates the symbol in source, understands why it is hot, and forms a single testable Go performance hypothesis (or null). Combines code-path mapping and pattern matching. Read-only on source. The orchestrator spawns one per candidate hotspot, in parallel across the ranked set.
 tools: Read, Grep, Glob, Bash
 ---
 
