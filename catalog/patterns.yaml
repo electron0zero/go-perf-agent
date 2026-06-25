@@ -1,8 +1,12 @@
 # go-perf-agent pattern catalog
 #
-# Source: Dave Cheney's high-performance-go-workshop and Bryan Boreham's fork
-#   https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
-#   https://github.com/bboreham/high-performance-go-workshop
+# Sources:
+#   Dave Cheney's high-performance-go-workshop and Bryan Boreham's fork
+#     https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
+#     https://github.com/bboreham/high-performance-go-workshop
+#   Go standard library docs (strconv, regexp, encoding/binary, sort/slices) via `go doc`
+#   Go GC guide  https://go.dev/doc/gc-guide
+#   Go wiki: CompilerOptimizations  https://go.dev/wiki/CompilerOptimizations
 #
 # Each pattern is a hypothesis template. A hotspot (hot function / allocation site / slow
 # span) is matched against these. `detect` heuristics pre-filter source sites
@@ -177,3 +181,90 @@ patterns:
     benchmark: loop with the deferred call; measure ns/op
     confidence: low
     risk: med
+
+  # --- additions grounded in Go stdlib docs / GC guide ---
+
+  - id: fmt-to-strconv
+    title: Use strconv instead of fmt for scalar formatting
+    optimizes: allocs
+    signal: fmt.(*pp) / reflect hot in cpu profile; fmt.Sprintf used to format numbers/bools
+    detect:
+      - 'fmt\.Sprint(f|ln)?\('
+    transform: "format scalars with strconv (Itoa/FormatInt/FormatFloat), or strconv.Append* into
+      a reused []byte, instead of fmt.Sprintf which reflects over its args and allocates"
+    benchmark: format the value in a tight loop; measure ns/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: regexp-compile-once
+    title: Compile regexps once, not per call
+    optimizes: cpu
+    signal: regexp.Compile / syntax.Parse / regexp.MatchString hot in cpu+alloc profile
+    detect:
+      - 'regexp\.Must?Compile\('
+      - 'regexp\.Match(String)?\('
+    transform: "hoist regexp.MustCompile to a package-level var and reuse the *Regexp; never compile
+      inside the hot path (regexp.MatchString recompiles the pattern on every call)"
+    benchmark: run the match in a loop, compiled-once vs per-call; measure ns/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: binary-read-reflection
+    title: Decode fixed layouts without encoding/binary reflection
+    optimizes: cpu
+    signal: encoding/binary.Read|Write and reflect.* hot when (de)serializing fixed-size records
+    detect:
+      - 'binary\.(Read|Write)\('
+    transform: "replace binary.Read/Write (they reflect over `any`) with the ByteOrder helpers
+      (binary.LittleEndian.Uint64 etc) over a []byte"
+    benchmark: decode/encode the record in a loop; measure ns/op and allocs/op
+    confidence: med
+    risk: med
+
+  - id: sort-reflection
+    title: Use generic slices.Sort over reflection-based sort.Slice
+    optimizes: cpu
+    signal: reflect.Swapper / sort.Slice closures hot in cpu profile
+    detect:
+      - 'sort\.(Slice|SliceStable|Sort)\('
+    transform: "use slices.SortFunc/SortStableFunc (generic, no reflection) instead of sort.Slice
+      (takes `any`, swaps via reflect.Swapper) / sort.Sort (interface dispatch per compare)"
+    benchmark: sort a representative slice in a loop; measure ns/op
+    confidence: med
+    risk: low
+
+  - id: interface-boxing
+    title: Avoid boxing scalars into interface{} on the hot path
+    optimizes: allocs
+    signal: runtime.convT64 / convTstring / convTslice hot in alloc profile
+    detect:
+      - '\[\]any\b'
+      - '\[\]interface\{\}'
+    transform: "stop converting non-pointer values to any/interface{} in the hot path (each
+      conversion can heap-allocate); use concrete types or generics, or store pointers"
+    benchmark: the boxing site in a loop; measure allocs/op
+    confidence: med
+    risk: med
+
+  - id: reduce-pointers-gc
+    title: Reduce pointers in large/long-lived structures
+    optimizes: gc
+    signal: runtime.scanobject / GC mark CPU significant; pointer-heavy structs held live in bulk
+    detect: []   # needs struct-layout / heap analysis, not regex
+    transform: "remove pointers from large or long-lived data (indices instead of *T, value fields,
+      []T over []*T) - the GC does not scan pointer-free memory (see the GC guide)"
+    benchmark: hold N of the structure live and force GC; measure GC CPU/pause (or pointer count)
+    confidence: med
+    risk: med
+
+  - id: map-clear-reuse
+    title: Reuse a map with clear() instead of reallocating each pass
+    optimizes: allocs
+    signal: runtime.makemap hot in a loop that rebuilds a map every iteration
+    detect:
+      - 'make\(map\['
+    transform: "allocate the map once outside the loop and clear() it each iteration (Go 1.21+)
+      rather than make()-ing a fresh map every pass"
+    benchmark: loop that rebuilds the map, clear-reuse vs make-each-iter; measure allocs/op
+    confidence: med
+    risk: low
