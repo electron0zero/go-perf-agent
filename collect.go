@@ -40,6 +40,7 @@ func (c *collectProfilesCmd) Run() error {
 
 	// cpu (time), alloc (churn), inuse (resident heap - the OOM signal). hotspots ranks each
 	// metric separately, so collecting all three keeps memory-residency a first-class signal.
+	collected := 0
 	for _, k := range []struct{ kind, pt string }{
 		{"cpu", cpuPT},
 		{"alloc", allocPT},
@@ -59,16 +60,23 @@ func (c *collectProfilesCmd) Run() error {
 		gcxArgs = append(gcxArgs, "-o", "json")
 		stdout, stderr, err := run("", "gcx", gcxArgs...)
 		if err != nil {
+			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
 			fmt.Fprint(os.Stderr, stderr)
-			return fmt.Errorf("pyroscope query failed (run 'gcx auth login' if the session expired): %w", err)
+			info("  %s query failed, skipping: %v", kind, err)
+			continue
 		}
 		rows, err := flamegraphLeaderboard(stdout, c.Limit)
 		if err != nil {
-			return fmt.Errorf("%s %s: %w", c.Service, kind, err)
+			info("  %s: %v (skipping)", kind, err)
+			continue
 		}
 		if err := writeJSON(out, rows); err != nil {
 			return err
 		}
+		collected++
+	}
+	if collected == 0 {
+		return fmt.Errorf("pyroscope query returned no profile for any type of %q (run 'gcx auth login' if the session expired)", c.Service)
 	}
 	fmt.Println(filepath.Join(gpaDir, "profiles"))
 	return nil

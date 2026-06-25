@@ -314,6 +314,9 @@ func (c *validateCmd) Run() error {
 	if err != nil {
 		return err
 	}
+	if wt == "" { // baseline wrote a non-worktree verdict (e.g. dependency opt-in needed); nothing to apply/judge
+		return nil
+	}
 	if c.Patch != "" {
 		info("applying patch %s in %s", c.Patch, wt)
 		if _, stderr, err := run(wt, "git", "apply", mustAbs(c.Patch)); err != nil {

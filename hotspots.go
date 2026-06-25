@@ -212,7 +212,7 @@ func parsePprof(path string, topn int) ([]rawHot, error) {
 	}
 	var hs []rawHot
 	for _, rs := range byMetric {
-		sort.Slice(rs, func(i, j int) bool { return rs[i].val > rs[j].val })
+		sort.SliceStable(rs, func(i, j int) bool { return rs[i].val > rs[j].val })
 		if topn > 0 && len(rs) > topn {
 			rs = rs[:topn]
 		}
@@ -230,6 +230,7 @@ func parseLeaderboard(path, kind string) []rawHot {
 	}
 	var rows []leaderboardRow
 	if json.Unmarshal(b, &rows) != nil {
+		info("  skipping unparseable leaderboard %s", path)
 		return nil
 	}
 	var hs []rawHot

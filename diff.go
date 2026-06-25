@@ -297,7 +297,9 @@ func receiverFromText(recv string) string {
 	return last
 }
 
-// symbolFor builds the pprof-style symbol module/pkg.(*Recv).Func for overlay matching.
+// symbolFor builds the pprof-style symbol for overlay matching. recv may carry a leading "*";
+// pprof renders pointer-receiver methods as pkg.(*T).M and value-receiver methods as pkg.T.M, so
+// preserve that distinction or the profile-weight overlay misses value-receiver methods.
 func symbolFor(pkgDir, recv, name string) string {
 	if modulePath == "" {
 		return ""
@@ -306,10 +308,14 @@ func symbolFor(pkgDir, recv, name string) string {
 	if pkgDir != "." && pkgDir != "" {
 		pkgPath = modulePath + "/" + pkgDir
 	}
-	if recv != "" {
-		return pkgPath + ".(*" + strings.TrimPrefix(recv, "*") + ")." + name
+	switch {
+	case recv == "":
+		return pkgPath + "." + name
+	case strings.HasPrefix(recv, "*"):
+		return pkgPath + ".(*" + recv[1:] + ")." + name
+	default:
+		return pkgPath + "." + recv + "." + name
 	}
-	return pkgPath + "." + name
 }
 
 func skipGoFile(file string) bool {
