@@ -43,6 +43,12 @@ following the steps below, or delegate to these:
   signal. Stage: HYPOTHESIZE.
 - `gpa-validation` - authors benchmark, applies one change, runs the gate; sets `proved` /
   `rejected` / `need_more_data`. Stage: VALIDATE.
+- `gpa-critic` - structurally distinct reflexion pass; reviews each `proved` change for
+  behavior-preservation / benchmark-gaming and can downgrade it. Stage: CRITIQUE.
+
+Other entry points: `go-perf-agent target-diff` (review a PR / local diff - changed funcs become
+the candidate set), `go-perf-agent bench-regression` (base-vs-head regression check, no edit),
+`go-perf-agent eval` (run the golden scenarios to check the engine itself).
 
 ## Step 0 - preflight
 
