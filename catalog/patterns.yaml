@@ -31,6 +31,7 @@
 #
 # Fields:
 #   id          stable slug
+#   kind        code (default) | workload   (see below)
 #   title       human name
 #   optimizes   cpu | allocs | bytes | latency | gc   (the benchstat metric that should move)
 #   signal      what telemetry symptom makes this pattern plausible
@@ -39,6 +40,13 @@
 #   benchmark   what the benchmark must exercise to prove it
 #   confidence  prior likelihood the change helps when the signal is present (low|med|high)
 #   risk        correctness risk of the transform (low|med|high)
+#
+# kind: most patterns are `code` - a source transform the benchstat gate proves/rejects. A
+# `workload` pattern is different: the bottleneck is the request/query SHAPE, not the code. It is
+# detected from telemetry (the slow trace's attributes - the query/filter, endpoint, request
+# fan-out), NOT a source regex, and the benchstat gate CANNOT validate it (there is no code change).
+# The analyst emits a workload finding as ADVISORY - it goes straight into the report with the
+# evidence and the suggested query/config fix; it is never run through bench-baseline/bench-verdict.
 
 version: 1
 patterns:
@@ -610,3 +618,32 @@ patterns:
       connection-reuse ratio and per-request latency
     confidence: med
     risk: med   # local benchstat can't prove this; verdict is usually need_more_data (load-test it)
+
+  # --- workload / query-shaped patterns (kind: workload) ---
+  # Advisory: the bottleneck is the request shape, not the code. Detected from the request's
+  # attributes, not source; the benchstat gate cannot validate it, so the analyst reports it
+  # directly with the fix.
+
+  - id: no-op-filter
+    kind: workload
+    title: A filter that matches everything adds no selectivity but still costs work
+    optimizes: latency
+    signal: the slow request carries an always-true filter (matches all values) that does not reduce
+      what is scanned
+    detect: []
+    transform: "remove the always-true filter from the query; it is a query fix, not a code change"
+    benchmark: advisory; compare the query with and without the filter
+    confidence: high
+    risk: low
+
+  - id: oversized-query
+    kind: workload
+    title: A low-selectivity query scans far more than it needs
+    optimizes: latency
+    signal: the slow request scans a large amount of data with little selective filtering, often over
+      a wide range, and is slow or times out
+    detect: []
+    transform: "narrow the range, add a selective filter, or reduce resolution; a query fix, not code"
+    benchmark: advisory; compare end-to-end latency before/after narrowing
+    confidence: med
+    risk: low

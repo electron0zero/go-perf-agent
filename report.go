@@ -50,6 +50,8 @@ func (c *reportCmd) Run() error {
 		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", v.Status, v.ID, delta, p, reason))
 	}
 
+	b.WriteString(telemetryCoverage())
+
 	b.WriteString("\n## Proved hypotheses (ship behind a flag, then verify in production)\n\n")
 	for _, v := range verdicts {
 		if v.Status != "proved" || v.Verdict == nil {
@@ -67,4 +69,51 @@ func (c *reportCmd) Run() error {
 	info("wrote %s", out)
 	fmt.Fprint(os.Stderr, b.String())
 	return nil
+}
+
+// telemetryCoverage inspects what was actually collected and reports infra/telemetry gaps, so the
+// user knows the tool ran on partial data and what would make it more precise. Grounded in the
+// Tempo run, where the heavy service lacked span profiles and the precise pivot fell back.
+func telemetryCoverage() string {
+	prof, _ := filepath.Glob(filepath.Join(gpaDir, "profiles", "*.pb.gz"))
+	traces, _ := filepath.Glob(filepath.Join(gpaDir, "traces", "*.json"))
+	exFiles, _ := filepath.Glob(filepath.Join(gpaDir, "profiles", "*.exemplars.*.json"))
+
+	prodProfiles := false
+	for _, p := range prof {
+		if !strings.HasPrefix(filepath.Base(p), "local.") {
+			prodProfiles = true
+		}
+	}
+	spanLinked := false
+	for _, f := range exFiles {
+		var r exemplarsResult
+		if raw, err := os.ReadFile(f); err == nil && json.Unmarshal(raw, &r) == nil && len(r.Exemplars) > 0 {
+			spanLinked = true
+		}
+	}
+
+	var missing []string
+	if len(traces) == 0 {
+		missing = append(missing, "production traces (Tempo) - without them the traces-first step can't localize the slow operation")
+	}
+	if !prodProfiles {
+		missing = append(missing, "production profiles (Pyroscope) - only local profiles were used, which miss real input distributions and load")
+	}
+	if len(exFiles) > 0 && !spanLinked {
+		missing = append(missing, "span profiles (otel-profiling-go) on the hot service - exemplars came back empty, so the precise trace->profile pivot fell back to the service-wide profile")
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Telemetry coverage\n\n")
+	if len(missing) == 0 {
+		b.WriteString("Full coverage: production traces, profiles, and span-linked profiles were available.\n")
+		return b.String()
+	}
+	b.WriteString("go-perf-agent works best when production telemetry includes Tempo traces, Pyroscope profiles, and span profiles (otel-profiling-go) on the hot services. This run was missing:\n\n")
+	for _, m := range missing {
+		b.WriteString("- " + m + "\n")
+	}
+	b.WriteString("\nResults are still valid but less precise; closing these gaps improves localization.\n")
+	return b.String()
 }
