@@ -38,9 +38,22 @@ flowchart TD
 
 ## How to use
 
-Prerequisites: Go 1.23+, `git`, and `benchstat`
-(`go install golang.org/x/perf/cmd/benchstat@latest`). For production telemetry, also install and
-authenticate [`gcx`](https://github.com/grafana/gcx) (`gcx auth login`).
+Prerequisites - tools on PATH:
+
+| tool | version | needed for |
+|---|---|---|
+| `go` | 1.23+ | building/running go-perf-agent and the benchmarks |
+| `git` | 2.5+ (worktree support) | per-hypothesis worktrees, diff modes |
+| `benchstat` | latest (`go install golang.org/x/perf/cmd/benchstat@latest`) | the numeric gate |
+| `gcx` | **v0.4.2+** | production telemetry (optional; local profiling works without it) |
+| `gh` | latest | PR diff mode only (`target-diff --pr`) |
+
+gcx minimum: v0.4.2 or newer, authenticated (`gcx auth login`). Older builds (e.g. v0.1.x) are not
+enough - the production path needs `gcx datasources tempo query` (traces), `gcx datasources
+pyroscope exemplars` (the trace->profile pivot), and `gcx datasources pyroscope query -o pprof`
+(profiles), none of which exist in early versions. Install/upgrade with
+`go install github.com/grafana/gcx/cmd/gcx@latest` (building gcx itself currently needs Go 1.26+).
+No gcx? The local `collect-local` path profiles with `go pprof` and needs none of the above.
 
 ```bash
 go build -o go-perf-agent .     # or: go install .

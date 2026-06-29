@@ -50,11 +50,15 @@ the candidate set), `go-perf-agent bench-regression` (base-vs-head regression ch
 ## Step 0 - preflight
 
 ```bash
+go-perf-agent doctor          # check required tools + gcx capabilities; warn on gaps/old gcx
 go-perf-agent selftest        # offline: proves the pipeline runs without Grafana
 gcx auth login           # ONLY if collecting live telemetry and the session is expired
 ```
 
-If the user has not picked a target service/window, ASK (AskUserQuestion). Do not guess.
+If `doctor` warns that gcx lacks `tempo query` / `exemplars` / `-o pprof`, tell the user to upgrade
+gcx (v0.4.2+) before the production path. If the user has not picked a target service/window, ASK
+(AskUserQuestion). Do not guess. For an incident, ask for the firing window; given a single
+timestamp, query +-5 min around it (`--from/--to`), not "now".
 
 ## Step 1 - COLLECT (deterministic)
 
@@ -63,13 +67,20 @@ say which operation is slow; profiles then explain that operation at the code le
 alone can rank CPU that is not on the slow path.
 ```bash
 go-perf-agent collect-traces    --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # 1. slowest operations (TraceQL)
-go-perf-agent collect-exemplars --service <svc> --window 1h --ds-uid <pyro-ds-uid>    # 2. pivot: profile UUIDs for that work
-go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>   # 3. pprof scoped to it
+# 2. pivot to the slow work. Fastest: a slow span's `pyroscope.profile.id` attribute IS its span
+#    id, and profiles are tagged with it under `span_id`, so fetch that exact profile directly:
+go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --span-id <pyroscope.profile.id>
+#    Or, when present, exemplars -> profile UUIDs:
+go-perf-agent collect-exemplars --service <svc> --window 1h --ds-uid <pyro-ds-uid>
+go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>
 ```
-Step 2 needs span-aware instrumentation (otelpyroscope); when exemplars come back empty, drop
-`--profile-id` in step 3 and pull the service-wide profile - the trace step still narrowed you to
-the slow service/operation. Datasource UIDs come from `gcx datasources list` (or GPA_TEMPO_DS_UID
-/ GPA_PYRO_DS). collect-profiles writes real pprof (.pb.gz); hotspots parses it.
+The `--span-id` pivot (traces-to-profiles, see
+https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles/) needs
+span profiling (otel-profiling-go) on the slow service, and by default only the local root span is
+tagged. When neither span-id nor exemplars resolve, drop the flags and pull the service-wide
+profile - the trace step still narrowed you to the slow service/operation. Datasource UIDs come
+from `gcx datasources list` (or GPA_TEMPO_DS_UID / GPA_PYRO_DS). collect-profiles writes real pprof
+(.pb.gz); hotspots parses it.
 
 Local fallback (gcx not set up / not authed) - profile with go pprof, no Grafana. This is the
 only profiles-first path:
@@ -171,6 +182,12 @@ generated/vendored code, or the signal is ambiguous. Surface the specific blocke
 ```bash
 go-perf-agent report                     # -> .go-perf-agent/report.md
 ```
+
+`report` also emits a "Telemetry coverage" section listing what was missing (no production traces
+/ profiles / span profiles) so the user knows the run was on partial data and what would sharpen
+it. Surface workload findings (`kind: workload` from the telemetry summary, e.g. a pathological
+query) under their own heading - they are ADVISORY (the query/dashboard fix), not benchstat-proved,
+so present them with the trace evidence and the suggested fix, never as a PROVED code change.
 
 Summarize for the user: proved hypotheses (with worktree paths), rejected ones with the reason,
 and need_more_data ones with what input you need. For each proved finding, SHARE THE PROOF: the

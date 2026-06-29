@@ -15,6 +15,13 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
 
 ## Procedure
 
+0. Version-pin check (when validating a production finding). The telemetry summary's
+   `deployed_version` is the commit the profile came from. Compare it to the worktree's HEAD
+   (`git rev-parse --short HEAD`). If they differ, WARN the user that the profile is from a
+   different build, and ASK whether to `git checkout <deployed_version>` first. Default is to
+   proceed on HEAD (in most cases the hot path is unchanged) and note in the verdict reason that it
+   was validated against HEAD, not the deployed ref. Do not silently validate a mismatch.
+
 1. Baseline.
    ```bash
    go-perf-agent bench-baseline <id>
