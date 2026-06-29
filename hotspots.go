@@ -150,19 +150,29 @@ func parsePprof(path string, topn int) ([]rawHot, error) {
 	if err != nil {
 		return nil, err
 	}
+	// local profiles are written as local.*.prof; gcx-collected ones come from pyroscope.
+	local := strings.HasPrefix(filepath.Base(path), "local.")
 	// which sample-type index maps to which of our metrics
 	want := map[int]string{}
+	sawKnown := false
 	for i, st := range p.SampleType {
 		switch st.Type {
 		case "cpu":
 			want[i] = "cpu"
+			sawKnown = true
 		case "alloc_space":
 			want[i] = "alloc"
+			sawKnown = true
 		case "inuse_space":
-			want[i] = "inuse"
+			// inuse (resident heap) is ~zero at the end of a benchmark, so it is meaningless from
+			// a local profile; it is a production-only signal (pyroscope/live heap).
+			sawKnown = true
+			if !local {
+				want[i] = "inuse"
+			}
 		}
 	}
-	if len(want) == 0 && len(p.SampleType) > 0 {
+	if !sawKnown && len(p.SampleType) > 0 {
 		want[len(p.SampleType)-1] = "cpu" // unknown profile: rank by its last sample type
 	}
 
@@ -183,9 +193,8 @@ func parsePprof(path string, topn int) ([]rawHot, error) {
 		}
 	}
 
-	// local profiles are written as local.*.prof; gcx-collected ones come from pyroscope.
 	source := "pyroscope"
-	if strings.HasPrefix(filepath.Base(path), "local.") {
+	if local {
 		source = "local-pprof"
 	}
 	byMetric := map[string][]rawHot{}

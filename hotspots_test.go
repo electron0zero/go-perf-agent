@@ -57,6 +57,26 @@ func TestParsePprof(t *testing.T) {
 	}
 }
 
+// inuse is ~zero at the end of a benchmark, so a local profile's inuse_space is meaningless:
+// parsePprof must skip inuse for local.* files but keep it for gcx-collected (pyroscope) ones.
+func TestParsePprofInuseLocalOnly(t *testing.T) {
+	dir := t.TempDir()
+	flat := map[string]int64{"github.com/grafana/tempo/pkg/a.F": 100}
+
+	local := filepath.Join(dir, "local.mem.pb.gz")
+	writePprof(t, local, "inuse_space", "bytes", flat)
+	if got, _ := parsePprof(local, 0); len(got) != 0 {
+		t.Errorf("local inuse should be skipped, got %+v", got)
+	}
+
+	prod := filepath.Join(dir, "svc.inuse.pb.gz")
+	writePprof(t, prod, "inuse_space", "bytes", flat)
+	got, _ := parsePprof(prod, 0)
+	if len(got) != 1 || got[0].metric != "inuse" || got[0].source != "pyroscope" {
+		t.Errorf("pyroscope inuse should be kept, got %+v", got)
+	}
+}
+
 // rankHotspots: a symbol hot in two metrics keeps a row for EACH (regression test for the
 // cross-metric blend bug that silently dropped the lower-pct metric).
 func TestRankHotspotsKeepsBothMetrics(t *testing.T) {
