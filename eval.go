@@ -30,6 +30,7 @@ type expectedSpec struct {
 	Pkg          string          `json:"pkg"`
 	Bench        string          `json:"bench"`
 	ScopeInclude []string        `json:"scope_include"`
+	BaselineOnly bool            `json:"baseline_only"` // read the verdict bench-baseline writes (e.g. dependency opt-in), skip bench-verdict
 }
 
 type scenarioResult struct {
@@ -130,6 +131,10 @@ func runScenario(self, dir string, spec expectedSpec, benchCount int) (string, e
 	}
 	if _, e := runSelf(self, tmp, env, "bench-baseline", id); e != nil {
 		return "", e
+	}
+	if spec.BaselineOnly {
+		// bench-baseline already wrote a terminal verdict (e.g. dependency opt-in -> need_more_data)
+		return readStatus(filepath.Join(tmp, gpaDir, "runs", id, "verdict.json"))
 	}
 	// apply the candidate change INTO THE WORKTREE (where bench-verdict judges), exactly like the
 	// validation agent edits .go-perf-agent/wt/<id>/ - not the repo root.

@@ -1,0 +1,1 @@
+{"type":"regression","expect_status":"clean","pkg":"./","bench":"BenchmarkBuild"}

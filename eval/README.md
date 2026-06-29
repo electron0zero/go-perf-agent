@@ -22,7 +22,12 @@ reliability, and benchmark noise is real - so flakiness is reported, not hidden.
 | noop-control | no change applied (noise canary) | rejected |
 | wrong-fast | faster but breaks the correctness test | rejected |
 | gamed-bench | candidate edits the benchmark it is judged by | rejected (structural) |
+| out-of-scope-edit | candidate strays into an out-of-scope package | rejected (structural) |
+| metric-tradeoff | improves the proof metric but regresses another | rejected (regression guard) |
+| dependency-optin | hypothesis targets a dependency outside scope | need_more_data |
 | regression | head slower than base | regression |
+| regression-clean | head not slower than base | clean |
+| regression-inconclusive | benchmark missing in the base ref | inconclusive |
 
 ## Adding a scenario
 
