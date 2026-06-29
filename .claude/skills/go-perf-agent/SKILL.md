@@ -58,16 +58,21 @@ If the user has not picked a target service/window, ASK (AskUserQuestion). Do no
 
 ## Step 1 - COLLECT (deterministic)
 
-LGTM path (gcx set up + `gcx auth login`):
+LGTM path (gcx set up + `gcx auth login`) - TRACES FIRST, then profiles. In production, traces
+say which operation is slow; profiles then explain that operation at the code level. Profiles
+alone can rank CPU that is not on the slow path.
 ```bash
-go-perf-agent collect-profiles --service <svc> --window 1h     # pyroscope cpu+alloc leaderboards
-go-perf-agent collect-traces   --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # optional
+go-perf-agent collect-traces    --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # 1. slowest operations (TraceQL)
+go-perf-agent collect-exemplars --service <svc> --window 1h --ds-uid <pyro-ds-uid>    # 2. pivot: profile UUIDs for that work
+go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>   # 3. pprof scoped to it
 ```
-`gcx datasources tempo query` is not implemented; traces go through the datasource proxy, which
-needs the Tempo datasource UID (`gcx datasources list`). Profiles are the primary code-level
-signal; traces only localize which operation is slow.
+Step 2 needs span-aware instrumentation (otelpyroscope); when exemplars come back empty, drop
+`--profile-id` in step 3 and pull the service-wide profile - the trace step still narrowed you to
+the slow service/operation. Datasource UIDs come from `gcx datasources list` (or GPA_TEMPO_DS_UID
+/ GPA_PYRO_DS). collect-profiles writes real pprof (.pb.gz); hotspots parses it.
 
-Local fallback (gcx not set up / not authed) - profile with go pprof, no Grafana:
+Local fallback (gcx not set up / not authed) - profile with go pprof, no Grafana. This is the
+only profiles-first path:
 ```bash
 go-perf-agent collect-local --pkg ./path/to/pkg --bench BenchmarkName   # writes cpu+alloc profiles
 # or drop an existing profile in: cp their.prof .go-perf-agent/profiles/
