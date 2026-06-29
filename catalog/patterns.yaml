@@ -7,10 +7,27 @@
 #   Go standard library docs (strconv, regexp, encoding/binary, sort/slices) via `go doc`
 #   Go GC guide  https://go.dev/doc/gc-guide
 #   Go wiki: CompilerOptimizations  https://go.dev/wiki/CompilerOptimizations
+#   Go wiki: Performance  https://go.dev/wiki/Performance
+#   Profiling Go Programs (pprof blog)  https://go.dev/blog/pprof
+#   go-optimization-guide (concurrency/memory patterns)  https://goperf.dev/
+#   go-perfbook (optimization hierarchy + Go tips)  https://github.com/dgryski/go-perfbook
+#   Guide to the Go GC  https://go.dev/doc/gc-guide
 #
 # Each pattern is a hypothesis template. A hotspot (hot function / allocation site / slow
 # span) is matched against these. `detect` heuristics pre-filter source sites
 # deterministically; the LLM only justifies/ranks among pre-filtered candidates.
+#
+# This catalog is the implementation/micro tier of the optimization hierarchy. Big wins come
+# first from a better algorithm or data structure, or from doing the work fewer times - so for
+# each hotspot first ask "can this work be eliminated, cached, or called less often?" (see
+# hoist-call-out-of-loop / single-item-cache) before reaching for a constant-factor transform.
+# Every transform also codifies an assumption about the data: validation must document it and
+# test the path where it does not hold (go-perfbook).
+#
+# Axis note: a `gc` proof is GC CPU / mark-scan time and live scannable-heap size, NOT ns/op - a
+# plain bench will not show it; it needs a force-GC benchmark (runtime.GC loop / ReadMemStats /
+# GODEBUG=gctrace). GOGC and GOMEMLIMIT are deployment config, never catalog patterns: they
+# cannot be proved by a microbench (validate against the production heap profile instead).
 #
 # Fields:
 #   id          stable slug
@@ -34,6 +51,18 @@ patterns:
       - 'make\(\[\][^,]+\)\s*$'
     transform: "make([]T, 0, n) with n derived from a known length, before the append loop"
     benchmark: build the slice at a representative size; measure B/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: slice-reuse
+    title: Reuse a slice across loop iterations instead of reallocating
+    optimizes: allocs
+    signal: growslice / runtime.makeslice hot in a loop that builds a fresh slice each iteration
+    detect:
+      - 'make\(\[\][^,]+,'
+    transform: "hoist the slice above the loop and reset it with s = s[:0] each pass, instead of
+      make()-ing a new one per iteration (keeps the backing array)"
+    benchmark: loop that rebuilds the slice, reuse vs make-each-iter; measure B/op and allocs/op
     confidence: high
     risk: low
 
@@ -85,12 +114,18 @@ patterns:
     risk: high
 
   - id: struct-field-align
-    title: Reorder struct fields to cut padding
+    title: Reorder struct fields (padding, cache line, GC scan)
     optimizes: bytes
-    signal: large count of a struct in heap; struct has mixed-width fields out of order
+    signal: large count of a struct in heap; mixed-width fields out of order; or a hot struct >64B
+      where only a few fields are touched; or a bulk-retained struct with pointers scattered late
     detect: []   # needs struct layout analysis, not regex
-    transform: "order fields largest-to-smallest alignment to remove padding"
-    benchmark: allocate N of the struct; measure B/op (or unsafe.Sizeof in a test)
+    transform: "reorder the fields once, optimizing for the live driver: largest-to-smallest
+      alignment to remove padding (bytes); hottest fields within the first 64 bytes so one
+      cache-line fetch serves the common access (cpu); pointer fields first, since the GC stops
+      scanning a value at its last pointer (gc). One change, possibly several wins"
+    benchmark: allocate/scan N of the struct at a representative size; measure B/op (padding),
+      ns/op at sizes exceeding cache (locality), or GC mark CPU on a live heap (scan). Assert
+      offsets with unsafe.Offsetof/Sizeof in a test
     confidence: med
     risk: low
 
@@ -159,17 +194,33 @@ patterns:
     confidence: med
     risk: low
 
-  - id: mutex-contention
-    title: Reduce lock contention
+  - id: lock-sharding
+    title: Shard a hot lock to cut contention
     optimizes: latency
-    signal: sync.(*Mutex).Lock hot in block/mutex profile; serialized spans in traces
+    signal: sync.(*Mutex).Lock hot in block/mutex profile; serialized spans in traces on a single
+      shared lock
     detect:
       - 'sync\.(Mutex|RWMutex)'
       - '\.Lock\(\)'
-    transform: "shard the lock, use RWMutex for read-heavy, or atomic for counters"
-    benchmark: parallel benchmark (b.RunParallel) hitting the lock; measure ns/op under -cpu
+    transform: "stripe the one lock into N shards keyed by hash(item)%N (or shrink the critical
+      section so the lock is held for less), so independent work no longer serializes"
+    benchmark: b.RunParallel hitting the lock from many goroutines, single vs sharded; measure ns/op under -cpu
     confidence: med
     risk: high
+    # see atomic-counter (single counter/flag) and cow-atomic-config (read-mostly) for those cases
+
+  - id: rwmutex-read-heavy
+    title: Switch a read-heavy Mutex to RWMutex
+    optimizes: latency
+    signal: sync.(*Mutex).Lock hot under a workload that is overwhelmingly reads with rare writes
+    detect:
+      - 'sync\.Mutex'
+      - '\.Lock\(\)'
+    transform: "replace sync.Mutex with sync.RWMutex and take RLock on the read paths so readers
+      run concurrently; keep Lock only for the writes"
+    benchmark: b.RunParallel read-heavy mix (small write %), Mutex vs RWMutex; measure ns/op under -cpu
+    confidence: med
+    risk: med   # RWMutex has higher fixed cost; a wrong read/write split can be slower than Mutex
 
   - id: defer-hot-loop
     title: Hoist defer out of hot loops
@@ -249,10 +300,15 @@ patterns:
   - id: reduce-pointers-gc
     title: Reduce pointers in large/long-lived structures
     optimizes: gc
-    signal: runtime.scanobject / GC mark CPU significant; pointer-heavy structs held live in bulk
-    detect: []   # needs struct-layout / heap analysis, not regex
-    transform: "remove pointers from large or long-lived data (indices instead of *T, value fields,
-      []T over []*T) - the GC does not scan pointer-free memory (see the GC guide)"
+    signal: runtime.scanobject / GC mark CPU significant; pointer-heavy structs, maps, or graphs
+      held live in bulk
+    detect:
+      - 'map\[string\]'
+      - 'map\[\*'
+    transform: "make bulk-retained data pointer-free so the GC skips it: indices instead of *T,
+      value fields, []T over []*T, an index-backed []Node graph instead of *Node chasing, and
+      fixed-width int/array map keys instead of string/*T - the GC does not scan pointer-free
+      memory and stops at a value's last pointer (see the GC guide)"
     benchmark: hold N of the structure live and force GC; measure GC CPU/pause (or pointer count)
     confidence: med
     risk: med
@@ -268,3 +324,289 @@ patterns:
     benchmark: loop that rebuilds the map, clear-reuse vs make-each-iter; measure allocs/op
     confidence: med
     risk: low
+
+  # --- additions from go.dev/wiki/Performance (profiling guide + Profiling Go Programs blog) ---
+
+  - id: map-to-slice-index
+    title: Replace small-integer/pointer-keyed maps with index-addressed slices
+    optimizes: cpu
+    signal: runtime.mapaccess1_fast64 / mapaccess2 / mapassign hot in cpu profile; a map keyed by a
+      dense small int or a *T that has (or can get) a dense ordinal
+    detect:
+      - 'map\[(int|int32|int64|uint|uint32|uint64)\]'
+      - 'map\[\*[A-Z][A-Za-z0-9_]*\]'
+    transform: "if keys are (or map to) a dense 0..N-1 range, replace the map with a []V indexed by
+      that ordinal; carry the ordinal on the element instead of hashing"
+    benchmark: build then do N lookups, map vs indexed slice, at representative size; measure ns/op
+    confidence: high
+    risk: med
+
+  - id: coalesce-allocs-struct
+    title: Combine several small heap allocations into one
+    optimizes: allocs
+    signal: many small malloc sites for related objects allocated together (alloc_objects high,
+      mallocgc hot); per-iteration closure / goroutine captures
+    detect: []   # needs LLM: must see that N allocs share a lifetime and can merge
+    transform: "merge co-allocated values into one struct (one alloc), or embed a value member
+      instead of a pointer member (bytes.Buffer not *bytes.Buffer); for loop captures, pack the
+      captured vars into one struct literal per iteration"
+    benchmark: run the allocating section in a loop; measure allocs/op and B/op
+    confidence: med
+    risk: low
+
+  - id: small-buf-on-struct
+    title: Inline a fixed-size array buffer on the struct to avoid heap allocation
+    optimizes: allocs
+    signal: makeslice / mallocgc hot for a small []byte (or []T) that is usually below a known small
+      bound and is owned by a struct
+    detect:
+      - 'make\(\[\]byte,'
+    transform: "add a fixed array field (e.g. bufArray [16]byte) and init the slice as
+      x.buf = x.bufArray[:0]; the common small case then needs no heap allocation"
+    benchmark: allocate the owning struct and fill the buffer to the common size; measure allocs/op
+    confidence: med
+    risk: low
+
+  - id: buffered-channel
+    title: Buffer channels to recover parallelism
+    optimizes: latency
+    signal: chan send/recv blocking hot in block profile; producer and consumer ping-pong with low
+      throughput; unbuffered channel in a hot pipeline
+    detect:
+      - 'make\(chan\s'
+    transform: "give the channel a buffer sized to decouple producer/consumer (or batch sends into a
+      fixed-size array before sending) so neither side stalls per item"
+    benchmark: producer/consumer pipeline, unbuffered vs buffered, b.RunParallel; measure ns/op and throughput
+    confidence: low
+    risk: med   # buffer sizing is workload-dependent and can mask backpressure bugs
+
+  # --- additions from goperf.dev (go-optimization-guide): concurrency + memory ---
+
+  - id: cow-atomic-config
+    title: Serve read-mostly shared state via an atomic snapshot instead of RWMutex
+    optimizes: latency
+    signal: sync.(*RWMutex).RLock hot on a read-heavy, rarely-written config / routing / lookup
+      path; reader contention in block/mutex profile or traces
+    detect:
+      - 'sync\.RWMutex'
+      - 'atomic\.(Value|Pointer)'
+    transform: "store an immutable *T behind atomic.Pointer[T] (or atomic.Value); readers Load() a
+      snapshot lock-free; writers build a fresh copy (copy-on-write) and Store() it"
+    benchmark: b.RunParallel read-mostly with a small write %, atomic vs RWMutex; measure ns/op under -cpu
+    confidence: med
+    risk: high   # readers must treat the snapshot as immutable; writer must not mutate in place
+
+  - id: atomic-counter
+    title: Replace a mutex-guarded counter/flag with sync/atomic
+    optimizes: latency
+    signal: sync.(*Mutex).Lock hot in mutex/block profile around a single counter or boolean
+    detect:
+      - '\.Lock\(\)'
+    transform: "use atomic.Int64.Add / atomic.Bool.Store|Load for a single-variable counter or flag;
+      keep the mutex only for genuine multi-step critical sections"
+    benchmark: b.RunParallel incrementing/reading, atomic vs mutex; measure ns/op under -cpu
+    confidence: med
+    risk: med
+
+  - id: bounded-worker-pool
+    title: Replace per-task goroutines with a bounded worker pool
+    optimizes: latency
+    signal: runtime.newproc / schedule / morestack hot; goroutine count tracks request/item volume;
+      scheduler + GC CPU rise under load
+    detect:
+      - 'go\s+func\s*\('
+    transform: "feed work through a buffered jobs channel consumed by a fixed pool (size
+      runtime.NumCPU() for CPU-bound, higher for I/O-bound), or cap fan-out with
+      errgroup.Group.SetLimit / a semaphore channel, instead of one goroutine per task"
+    benchmark: b.RunParallel feeding N tasks, pool vs goroutine-per-task; measure ns/op, allocs/op, peak goroutines
+    confidence: med
+    risk: high   # changes ordering, backpressure, and error-propagation semantics
+
+  - id: batch-ops
+    title: Batch small repeated I/O / RPC / DB ops into one
+    optimizes: latency
+    signal: many small syscall.write / RPC / DB-exec spans in traces; fixed per-op overhead
+      dominates; high op count, low per-op payload
+    detect: []   # needs LLM/trace: per-op fixed cost, items independent, caller tolerates flush delay
+    transform: "accumulate items and flush in one call on a size-or-time threshold (single multi-row
+      insert, batched WriteString, one io.Writer flush) instead of one call per item"
+    benchmark: process N items, per-item vs batched flush; measure ns/op, allocs/op, op/syscall count
+    confidence: med
+    risk: high   # changes durability/latency: buffered items can be lost on crash before flush
+
+  - id: stream-copybuffer
+    title: Stream with a reused buffer instead of materializing whole payloads
+    optimizes: allocs
+    signal: io.ReadAll / large make([]byte,...) per request hot in alloc profile; whole-body
+      buffering before processing
+    detect:
+      - 'io\.ReadAll\('
+      - 'ioutil\.ReadAll\('
+    transform: "stream via io.CopyBuffer(dst, src, buf) with a reused (or pooled) []byte, or process
+      incrementally, instead of reading the entire payload into memory"
+    benchmark: copy/transform a representative payload, ReadAll vs CopyBuffer; measure B/op and allocs/op
+    confidence: med
+    risk: med
+
+  - id: false-sharing-pad
+    title: Pad concurrently-written fields onto separate cache lines
+    optimizes: cpu
+    signal: high CPU on a tight parallel loop writing adjacent struct/array fields from different
+      goroutines; gains appear only at -cpu>1, not single-threaded
+    detect: []   # needs layout + concurrency analysis: which fields are written by which goroutine
+    transform: "separate per-goroutine hot fields onto distinct 64-byte cache lines with padding
+      (e.g. _ [64]byte between fields, or a per-shard struct in its own cache line)"
+    benchmark: b.RunParallel writing the fields from multiple goroutines, padded vs unpadded; measure ns/op at -cpu=NumCPU
+    confidence: low
+    risk: low
+
+  - id: once-value
+    title: Use sync.OnceValue/OnceValues for lazy one-time init
+    optimizes: latency
+    signal: expensive init (compile, load, parse) run eagerly at startup or repeated; a manual
+      sync.Once + var / double-checked-lock idiom on a first-use path
+    detect:
+      - 'sync\.Once\b'
+    transform: "replace manual sync.Once + package var (or hand-rolled double-checked locking) with
+      sync.OnceValue / sync.OnceValues (Go 1.21+) to lazily compute once on first use"
+    benchmark: concurrent first-use + steady-state Get, OnceValue vs manual Once; measure ns/op
+    confidence: low
+    risk: low
+
+  # --- additions from go-perfbook (Damian Gryski): the implementation/micro tier; large wins
+  # --- come first from a better algorithm or doing the work fewer times (see header note) ---
+
+  - id: hoist-call-out-of-loop
+    title: Reduce a hot routine's call count instead of optimizing its body
+    optimizes: cpu
+    signal: a routine is high in CUMULATIVE profile time from call count, not self-time-per-call
+      (cheap body, called too often)
+    detect: []   # needs profile call-count vs self-time, not regex
+    transform: "lift a loop-invariant call out of the loop and reuse its result, or batch inputs so
+      it runs once over N items instead of N times - the fastest work is work not done"
+    benchmark: loop calling per-iteration vs hoisted/batched over a representative N; measure ns/op
+    confidence: high
+    risk: low
+
+  - id: single-item-cache
+    title: Memoize the most-recent result of a hot pure function
+    optimizes: cpu
+    signal: one expensive deterministic function dominates cpu profile and is called repeatedly
+      with temporally-clustered identical args (e.g. time.Parse per log line)
+    detect: []   # needs LLM: function must be pure and inputs temporally clustered
+    transform: "cache the last (input,output) pair on a package/struct field; on call, return the
+      cached output when the input matches, else compute and store. Single slot, no eviction.
+      Document the locality assumption"
+    benchmark: drive with a production-representative key stream (clustered, not uniform) at a
+      realistic hit ratio, plus a 0%-hit control; measure ns/op
+    confidence: med
+    risk: med
+
+  - id: cheap-check-before-expensive
+    title: Guard an expensive check with a cheaper necessary condition
+    optimizes: cpu
+    signal: an expensive predicate (regexp, full parse, lookup) is hot but mostly returns the
+      negative/no-match result
+    detect:
+      - '\.MatchString\('
+      - '\.Match\('
+      - 'regexp\.'
+    transform: "front the expensive predicate with a cheap necessary-condition test (substring /
+      prefix / length, or a bloom filter) that rejects the common negative case before it runs"
+    benchmark: realistic positive/negative ratio, plus a 100%-positive control to confirm no
+      slow-path regression; measure ns/op
+    confidence: med
+    risk: low
+
+  - id: branch-out-of-inner-loop
+    title: Hoist a loop-invariant branch out of the inner loop
+    optimizes: cpu
+    signal: hot tight loop with an if/switch on a value that does not change across iterations
+    detect: []   # needs to see the branch condition is loop-invariant
+    transform: "split the loop on the invariant: if cond { for {A} } else { for {B} } instead of
+      for { if cond {A} else {B} }"
+    benchmark: loop over a representative length with the condition fixed; measure ns/op at -cpu=1
+    confidence: low
+    risk: low
+
+  - id: soa-layout
+    title: Split a struct slice into parallel arrays (struct-of-arrays)
+    optimizes: cpu
+    signal: a hot loop scans []Struct touching only one or two fields of a wide struct; memory-bound
+      stalls / cache misses dominate
+    detect: []   # needs to see a wide-struct slice scanned on few fields
+    transform: "convert []Struct to a struct-of-slices (one []T per hot field) so the scan walks
+      contiguous memory instead of striding over unused fields"
+    benchmark: scan a representative-length collection touching only the hot field(s) at sizes that
+      exceed L2 (so cache effects are real); measure ns/op
+    confidence: med
+    risk: med
+
+  - id: sentinel-error-var
+    title: Return a package-level error value instead of allocating per call
+    optimizes: allocs
+    signal: errors.New / fmt.Errorf hot in the alloc profile on a frequently-hit error path
+      (expected/sentinel errors, validation rejections)
+    detect:
+      - 'errors\.New\('
+      - 'fmt\.Errorf\('
+    transform: "for a fixed (non-formatted) error, define a package-level var ErrX = errors.New(...)
+      and return it; reserve fmt.Errorf for paths that actually interpolate"
+    benchmark: drive the error path at scale; measure B/op and allocs/op
+    confidence: high
+    risk: low
+
+  - id: timer-reuse-not-after
+    title: Reuse a time.Timer instead of time.After in a loop
+    optimizes: gc
+    signal: time.After hot in alloc profile, or memory held by unfired timers in a long-lived select
+      loop (a Timer is not GC'd until it fires)
+    detect:
+      - 'time\.After\('
+    transform: "create one time.NewTimer outside the loop; each pass Stop() (drain if needed) and
+      Reset() it, instead of time.After which leaks a Timer until it fires"
+    benchmark: select loop re-arming the timeout each iteration over many iterations; measure allocs/op and B/op
+    confidence: high
+    risk: med
+
+  - id: equalfold-no-lowercase
+    title: Use strings.EqualFold instead of allocating lowercased copies
+    optimizes: allocs
+    signal: strings.ToLower / ToUpper allocations hot, feeding an == comparison for
+      case-insensitive matching
+    detect:
+      - 'strings\.ToLower\([^)]*\)\s*==\s*strings\.ToLower'
+      - 'strings\.ToUpper\([^)]*\)\s*==\s*strings\.ToUpper'
+    transform: "replace strings.ToLower(a) == strings.ToLower(b) with strings.EqualFold(a, b), which
+      compares case-insensitively without allocating"
+    benchmark: case-insensitive compare over representative pairs; measure B/op, allocs/op, ns/op
+    confidence: high
+    risk: low
+
+  - id: per-goroutine-rand
+    title: Use a per-goroutine rand.Rand instead of the global rand functions
+    optimizes: latency
+    signal: runtime mutex / lock contention attributed to math/rand top-level functions under
+      concurrency
+    detect:
+      - '\brand\.(Int|Intn|Int63|Float64|Read|Shuffle)\('
+    transform: "give each goroutine/worker its own rand.New(rand.NewSource(seed)) (or math/rand/v2);
+      the package-level functions serialize on one global mutex"
+    benchmark: b.RunParallel hammering the RNG at -cpu=1 and -cpu=NumCPU, global vs per-goroutine; measure ns/op
+    confidence: high
+    risk: low
+
+  - id: drain-http-body
+    title: Drain and close the HTTP response body to enable connection reuse
+    optimizes: latency
+    signal: traces show a new TCP connect / TLS handshake on most outbound HTTP calls (no keep-alive
+      reuse), or high connection churn to a downstream
+    detect:
+      - 'http\.(Get|Post|Do|Head)\('
+      - '\.Body\.Close\(\)'
+    transform: "before closing, drain the body (io.Copy(io.Discard, resp.Body)) so the transport can
+      reuse the connection; an undrained body forces a new connection next time"
+    benchmark: repeated requests to one host (vegeta/k6/fortio load test, not a microbench); measure
+      connection-reuse ratio and per-request latency
+    confidence: med
+    risk: med   # local benchstat can't prove this; verdict is usually need_more_data (load-test it)
