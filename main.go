@@ -36,6 +36,7 @@ var (
 // cli is the kong command tree. Each leaf is a *Cmd struct with a Run() error method (same
 // pattern as cmd/tempo-cli). kong derives kebab-case command names from the field names.
 var cli struct {
+	Doctor           doctorCmd           `cmd:"" help:"Preflight: check required tools + gcx capabilities/min version, warn on gaps"`
 	Selftest         selftestCmd         `cmd:"" help:"Offline pipeline check, benchmark -> hotspots [no production telemetry, local data]"`
 	Scope            scopeCmd            `cmd:"" help:"Set in/out-of-scope code paths for the agents"`
 	CollectTraces    collectTracesCmd    `cmd:"" help:"TraceQL: find the slowest operations via gcx tempo [production telemetry, needs auth]"`
