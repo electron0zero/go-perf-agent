@@ -123,7 +123,19 @@ Built with open source:
 - Go's [`pprof`](https://pkg.go.dev/runtime/pprof), [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat),
 - [`alecthomas/kong`](https://github.com/alecthomas/kong) for CLI flags,
 
-The performance pattern catalog is built from Dave Cheney's High Performance Go Workshop and Bryan
-Boreham's fork:
-- https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
-- https://github.com/bboreham/high-performance-go-workshop
+The performance pattern catalog is built from:
+- Dave Cheney's High Performance Go Workshop: https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
+- Bryan Boreham's fork: https://github.com/bboreham/high-performance-go-workshop
+- The Go wiki performance guide: https://go.dev/wiki/Performance
+- The Go optimization guide (goperf.dev): https://goperf.dev/
+
+## Further reading
+
+- Dave Cheney's High Performance Go Workshop: https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
+- Go wiki performance guide: https://go.dev/wiki/Performance
+- Go optimization guide (goperf.dev): https://goperf.dev/
+- "Profiling Go Programs" (the pprof blog): https://go.dev/blog/pprof
+- Eben Freeman on the garbage collector: https://youtu.be/M0HER1G5BRw
+- Bryan Boreham, "Obscure Go Optimisations": https://youtu.be/rRtihWOcaLI
+- Damian Gryski's go-perfbook: https://github.com/dgryski/go-perfbook/blob/master/performance.md#writing-and-optimizing-go-code
+- Guide to the Go GC: https://go.dev/doc/gc-guide
