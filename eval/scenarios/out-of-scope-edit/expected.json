@@ -1,1 +1,22 @@
-{"type":"verdict","expect_status":"rejected","scope_include":["inscope"],"hypothesis":{"id":"h-oos","pattern":"string-builder","symbol":"evaloos/inscope.Build","metric":"allocs_op","rationale":"+= concat -> strings.Builder, but the candidate also edits an out-of-scope package","evidence":{"source":"local-pprof","value":"seed"},"benchmark":{"pkg":"./inscope","name":"BenchmarkBuild"}}}
+{
+  "type": "verdict",
+  "expect_status": "rejected",
+  "scope_include": [
+    "inscope"
+  ],
+  "hypothesis": {
+    "id": "h-oos",
+    "pattern": "string-builder",
+    "symbol": "evaloos/inscope.Build",
+    "metric": "allocs_op",
+    "rationale": "+= concat -> strings.Builder, but the candidate also edits an out-of-scope package",
+    "evidence": {
+      "source": "local-pprof",
+      "value": "seed"
+    },
+    "benchmark": {
+      "pkg": "./inscope",
+      "name": "BenchmarkBuild"
+    }
+  }
+}

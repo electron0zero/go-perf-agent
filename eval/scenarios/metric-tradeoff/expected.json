@@ -1,1 +1,19 @@
-{"type":"verdict","expect_status":"rejected","hypothesis":{"id":"h-tradeoff","pattern":"escape-to-stack","symbol":"evalmod.Sum","metric":"allocs_op","rationale":"remove the slice allocation, but the change makes sec/op much worse","evidence":{"source":"local-pprof","value":"seed"},"benchmark":{"pkg":"./","name":"BenchmarkSum"}}}
+{
+  "type": "verdict",
+  "expect_status": "rejected",
+  "hypothesis": {
+    "id": "h-tradeoff",
+    "pattern": "escape-to-stack",
+    "symbol": "evalmod.Sum",
+    "metric": "allocs_op",
+    "rationale": "remove the slice allocation, but the change makes sec/op much worse",
+    "evidence": {
+      "source": "local-pprof",
+      "value": "seed"
+    },
+    "benchmark": {
+      "pkg": "./",
+      "name": "BenchmarkSum"
+    }
+  }
+}

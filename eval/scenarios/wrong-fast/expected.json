@@ -1,1 +1,19 @@
-{"type":"verdict","expect_status":"rejected","hypothesis":{"id":"h","pattern":"string-builder","symbol":"evalmod.Build","metric":"allocs_op","rationale":"+= concat -> strings.Builder","evidence":{"source":"local-pprof","value":"seed"},"benchmark":{"pkg":"./","name":"BenchmarkBuild"}}}
+{
+  "type": "verdict",
+  "expect_status": "rejected",
+  "hypothesis": {
+    "id": "h",
+    "pattern": "string-builder",
+    "symbol": "evalmod.Build",
+    "metric": "allocs_op",
+    "rationale": "+= concat -> strings.Builder",
+    "evidence": {
+      "source": "local-pprof",
+      "value": "seed"
+    },
+    "benchmark": {
+      "pkg": "./",
+      "name": "BenchmarkBuild"
+    }
+  }
+}

@@ -1,1 +1,6 @@
-{"type":"regression","expect_status":"regression","pkg":"./","bench":"BenchmarkBuild"}
+{
+  "type": "regression",
+  "expect_status": "regression",
+  "pkg": "./",
+  "bench": "BenchmarkBuild"
+}

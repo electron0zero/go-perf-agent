@@ -1,1 +1,28 @@
-{"type":"verdict","expect_status":"need_more_data","baseline_only":true,"scope_include":["pkg/app"],"hypothesis":{"id":"h-dep","pattern":"sync-pool","symbol":"github.com/example/dep.(*Reader).Read","metric":"B_op","rationale":"pool buffers in the vendored dependency","evidence":{"source":"pyroscope","value":"seed"},"benchmark":{"pkg":"./vendor/github.com/example/dep","name":"BenchmarkRead"},"dependency":{"path":"vendor/github.com/example/dep","kind":"vendored-oss","upstream":"github.com/example/dep"}}}
+{
+  "type": "verdict",
+  "expect_status": "need_more_data",
+  "baseline_only": true,
+  "scope_include": [
+    "pkg/app"
+  ],
+  "hypothesis": {
+    "id": "h-dep",
+    "pattern": "sync-pool",
+    "symbol": "github.com/example/dep.(*Reader).Read",
+    "metric": "B_op",
+    "rationale": "pool buffers in the vendored dependency",
+    "evidence": {
+      "source": "pyroscope",
+      "value": "seed"
+    },
+    "benchmark": {
+      "pkg": "./vendor/github.com/example/dep",
+      "name": "BenchmarkRead"
+    },
+    "dependency": {
+      "path": "vendor/github.com/example/dep",
+      "kind": "vendored-oss",
+      "upstream": "github.com/example/dep"
+    }
+  }
+}
