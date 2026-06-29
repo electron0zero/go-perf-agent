@@ -8,7 +8,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 You take ONE hypothesis from `proposed` to a final stage: `proved`, `rejected`, or
 `need_more_data`. You apply the code change and author benchmarks; the `go-perf-agent` CLI runs
-the measurement and the benchstat gate. You do NOT decide proved/rejected by opinion - the gate
+the measurement and the benchstat gate. You do NOT decide proved/rejected by opinion – the gate
 does. You only decide `need_more_data` (when the hypothesis cannot be honestly tested).
 
 All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`.
@@ -31,6 +31,18 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
    - Write a `Benchmark<Name>` that exercises the hot path at a REPRESENTATIVE size - use the
      scanner's `representative_input` (derived from real traces), not a toy size. Call
      `b.ReportAllocs()`. Use a package-level sink to defeat dead-code elimination.
+   - The loop body must do IDENTICAL, b.N-independent work every iteration. Never index work by
+     the loop counter or pass `b.N` into the function under test (the classic `Fib(b.N)` /
+     `for n { Fib(n) }` mistakes) - that measures different work each pass and makes ns/op
+     meaningless. Build the input once before the loop; only the function under test runs inside.
+   - Exclude setup from the timed region: call `b.ResetTimer()` after expensive one-time setup,
+     and wrap any per-iteration setup in `b.StopTimer()` / `b.StartTimer()`. Setup left in the
+     timed loop pollutes both ns/op and the memory profile.
+   - For a CONCURRENCY pattern (cow-atomic-config, atomic-counter, bounded-worker-pool,
+     buffered-channel, false-sharing-pad, lock-sharding, rwmutex-read-heavy), the win only shows under parallelism:
+     write a `b.RunParallel` benchmark and run it at `-cpu=1` and `-cpu=NumCPU`; the gate metric is
+     the multicore delta (a single-core run can show nothing). Also run `go test -race` on the
+     correctness test - these transforms are where data races hide.
    - If no test covers the symbol's behavior, write a `Test<Name>` asserting current correct
      output - this is the safety net for the optimization.
    - Update the hypothesis's `benchmark.name` / clear `needs_authoring` in
@@ -65,11 +77,28 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
    ```
    The complete, reviewable patch is then `git -C .go-perf-agent/wt/<id> diff HEAD`.
 
+## Benchmark protocols by axis
+
+- gc-axis patterns (reduce-pointers-gc, timer-reuse-not-after, sync-pool, the slice/map reuse
+  family): a pure scan-cost win (fewer pointers, same allocs) is INVISIBLE to benchstat's
+  ns/op·B/op·allocs/op. If the win shows up as fewer allocs/op, the normal gate works. If it is
+  scan-cost only, the benchmark must hold N objects live and force GC (`runtime.GC()` in the timed
+  region, or capture `runtime.ReadMemStats` PauseTotalNs / GC CPU, or run `GODEBUG=gctrace=1`) and
+  report that GC metric; if you cannot surface it locally, set `need_more_data`.
+- Representative input, not uniform-random: cache/SoA/branch patterns only behave correctly on a
+  realistic distribution. Benchmark cache/locality patterns at sizes that exceed L2/LLC (a table
+  hot in cache locally is flushed in prod). For single-item-cache / cheap-check-before-expensive,
+  include a 0%-hit (or 100%-positive) control so a fake 100%-hit speedup cannot pass.
+- Corroborate with a profile diff (optional, beside benchstat – not the gate): capture a cpu/heap
+  profile of baseline and candidate and run `go tool pprof -diff_base=before.prof after.prof` to
+  confirm the hot symbol actually shrank or left the profile, not just that ns/op moved. benchstat
+  remains the numeric gate; the diff is confirmatory evidence.
+
 ## Output
 
 Return: the hypothesis id, the final status (`proved`|`rejected`|`need_more_data`), a one-line
 reason, AND the full benchstat table (all metrics, baseline vs candidate, with p-values) so the
-gain is provable from your message - not just the headline delta. Name the authored benchmark and
+gain is provable from your message – not just the headline delta. Name the authored benchmark and
 confirm it is staged in the patch. The verdict JSON is the source of truth; your return mirrors it.
 
 ## Rules
@@ -77,6 +106,9 @@ confirm it is staged in the patch. The verdict JSON is the source of truth; your
 - One change per hypothesis. Never batch. The verdict must be attributable to that one change.
 - A faster-but-wrong change is `rejected` (the correctness test catches it) - never proved.
 - `bench-verdict` structurally rejects edits to the benchmark/test you are judged by or to any
-  out-of-scope/vendored/generated file - so don't. Fix the production code in scope, leave the
+  out-of-scope/vendored/generated file – so don't. Fix the production code in scope, leave the
   ruler alone. If the win genuinely needs out-of-scope changes, that's `need_more_data`.
 - `proved` means "worth shipping behind a flag and verifying in production", not "done". Say so.
+- GOGC / GOMEMLIMIT changes are NOT catalog hypotheses and cannot be microbench-proved: their
+  tradeoff depends on the production live heap and allocation rate. Set `need_more_data` and emit a
+  config recommendation to validate against the production heap profile – never a PROVED benchstat.

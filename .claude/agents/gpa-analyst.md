@@ -21,10 +21,15 @@ telemetry summary (`.go-perf-agent/telemetry/summary.json`), the profiles, and t
    and the structural cause (per-row append, string concat, copy-in-range, lock held across I/O,
    reflection, ...). Cross-reference traces for a realistic input size.
 
-2. Match a pattern. For catalog patterns whose `optimizes` fits the metric (cpu->ns_op,
-   alloc->B_op/allocs_op), test the `detect` regexes against the body; `detect: []` patterns
-   need your judgement. The transform must plausibly apply to THIS code, and the proof metric
-   must actually be able to move here.
+2. Match a pattern. First work the hierarchy, biggest lever first: can this work be ELIMINATED
+   (is it needed at all?), CACHED/memoized (single-item-cache), or CALLED LESS OFTEN
+   (hoist-call-out-of-loop - a symbol can be hot from call count, not self-time)? The fastest work
+   is work never done; a better algorithm or data structure beats any constant-factor transform.
+   Only then reach for a constant-factor micro-pattern. For catalog patterns whose `optimizes` fits
+   the metric (cpu->ns_op, alloc->B_op/allocs_op), test the `detect` regexes against the body;
+   `detect: []` patterns need your judgement. The transform must plausibly apply to THIS code, the
+   proof metric must actually be able to move here, and any data assumption it encodes (cache
+   locality, common-case ratio) must be stated in the rationale.
 
 3. Plan the benchmark. Grep the package's `*_test.go` for a `Benchmark` exercising the symbol;
    use its name, or set `needs_authoring: true` and state the representative input size.

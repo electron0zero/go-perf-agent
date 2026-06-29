@@ -37,6 +37,27 @@ Ask, reading the diff and the benchmark/target source:
 - Did the change move work out of the timed region rather than remove it (e.g. precompute in
   init, cache across calls in a way that is invalid in production)?
 - Is the win an artifact (dead-code elimination, the compiler optimizing away the benchmark)?
+- Does the benchmark loop do identical, b.N-independent work each iteration? Reject if it indexes
+  work by the loop counter or feeds `b.N` to the function under test (`Fib(b.N)` / `Fib(n)`) -
+  that measures different work per pass, so the delta is noise, not a win.
+- Is setup excluded from the timed region (`b.ResetTimer()` after one-time setup,
+  `StopTimer`/`StartTimer` around per-iteration setup)? Setup left in the loop skews ns/op and the
+  alloc count, which can manufacture or hide a delta.
+- For a concurrency transform (cow-atomic-config, batch-ops, bounded-worker-pool, atomic-counter),
+  the numeric gate cannot see broken semantics. Check: `-race` is clean; a copy-on-write reader
+  never mutates the shared snapshot in place; batching has not silently changed durability/ordering
+  (items lost on crash before flush); a worker pool preserves the ordering and error-propagation
+  the callers rely on. Reject a fast-but-incorrect concurrency change.
+- For a gc-axis win, confirm the benchmark actually forces GC and measures mark/scan CPU or live
+  bytes - a "GC win" with no GC in the timed region is gamed. Where possible, confirm the hot
+  symbol actually shrank or left the after-profile (`go tool pprof -diff_base`), not just that
+  ns/op dropped.
+- For an assumption-encoding transform (single-item-cache, cheap-check-before-expensive, soa-layout),
+  the change is correct only under a data assumption. Require the assumption documented in a comment
+  AND a test of the path where it does not hold (cache miss, 100%-positive predicate). A cache
+  benchmark with no 0%-hit control is showing a fake 100%-hit speedup - reject it.
+- Veto any attempt to "prove" a GOGC / GOMEMLIMIT change via a microbench: downgrade to
+  `need_more_data` (GC config must be validated against the production heap profile, not a bench).
 
 Record your judgment:
 ```bash

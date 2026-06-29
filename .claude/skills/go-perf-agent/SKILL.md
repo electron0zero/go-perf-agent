@@ -1,12 +1,12 @@
 ---
 name: go-perf-agent
-description: LLM-assisted Go performance audit agent for the Grafana LGTM stack. Forms optimization hypotheses from real Tempo traces + Pyroscope profiles (via gcx) and the common-Go-perf-pattern catalog, validates each in an isolated git worktree with interleaved benchmarks, and proves or rejects with benchstat. Use when asked to audit a Go codebase for performance and improve it from production telemetry.
+description: LLM-assisted Go performance audit agent driven by production telemetry. Forms optimization hypotheses from real Tempo traces + Pyroscope profiles (via gcx) and the common-Go-perf-pattern catalog, validates each in an isolated git worktree with interleaved benchmarks, and proves or rejects with benchstat. Use when asked to audit a Go codebase for performance and improve it from production telemetry.
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Agent, AskUserQuestion
 ---
 
 # go-perf-agent
 
-LLM-assisted Go performance audit over the Grafana LGTM stack. A hybrid system: deterministic
+LLM-assisted Go performance audit over production telemetry (Tempo + Pyroscope via gcx). A hybrid system: deterministic
 tools do all telemetry collection and measurement; the LLM only reasons about code (forming
 hypotheses, applying one change, authoring a missing benchmark). Hard numbers from `benchstat`
 decide keep/reject - never the model. See `DECISIONS.md` for why.
@@ -58,7 +58,7 @@ If the user has not picked a target service/window, ASK (AskUserQuestion). Do no
 
 ## Step 1 - COLLECT (deterministic)
 
-LGTM path (gcx set up + `gcx auth login`) - TRACES FIRST, then profiles. In production, traces
+Production-telemetry path (gcx set up + `gcx auth login`) - TRACES FIRST, then profiles. In production, traces
 say which operation is slow; profiles then explain that operation at the code level. Profiles
 alone can rank CPU that is not on the slow path.
 ```bash
@@ -78,7 +78,7 @@ go-perf-agent collect-local --pkg ./path/to/pkg --bench BenchmarkName   # writes
 # or drop an existing profile in: cp their.prof .go-perf-agent/profiles/
 ```
 In the local case, ASK the user which codepath/package/function to target - that focuses
-profiling and scope. `gpa-query-telemetry` owns picking LGTM vs local and the target question.
+profiling and scope. `gpa-query-telemetry` owns picking production-telemetry vs local and the target question.
 
 ## Step 2 - EXTRACT (deterministic)
 
@@ -94,12 +94,22 @@ For each top editable hotspot, read the symbol's source (resolve `file:line` wit
 and match it against `go-perf-agent/catalog/patterns.yaml`. The catalog's `detect` regexes
 pre-filter which patterns are even plausible; you make the judgement call among them.
 
+Work the optimization hierarchy biggest-lever-first: before any constant-factor pattern, ask
+"can this work be ELIMINATED, CACHED, or CALLED LESS OFTEN?" The fastest code is the code that
+never runs, and a better algorithm/data structure beats any micro-transform; the catalog is the
+bottom (implementation) tier. When reading a profile, optimize where flat time is high but
+navigate by cumulative time (a 0%-flat / high-cum driver tells you where to descend);
+`go tool pprof` top / top -cum / list / web are the tools.
+
 Produce `.go-perf-agent/hypotheses.json` - an array conforming to
 `go-perf-agent/schema/hypothesis.schema.json`. One hypothesis = one symbol + one pattern + one
 benchmark that can prove it. Rules:
 
 - Tie every hypothesis to a real signal (the hotspot's weight + metric). No signal, no
   hypothesis.
+- Amdahl's law caps the win at the symbol's share. Do not spend a worktree on a hotspot that is a
+  tiny fraction of the profile (rule of thumb: skip sub-1% symbols); a perfect fix there is
+  invisible end-to-end. Prefer the heaviest in-scope candidates.
 - Pick `metric` = the benchstat metric that should move (`ns_op`/`B_op`/`allocs_op`),
   matching the pattern's `optimizes`.
 - If no benchmark exercises the symbol, set `benchmark.needs_authoring: true` and name the
@@ -189,7 +199,17 @@ proved hypothesis, tell the user to:
 1. ship the change behind a flag / canary,
 2. re-pull the SAME Pyroscope profile and Tempo traces for the service after rollout, and
 3. confirm the hot symbol's weight actually dropped and latency/alloc moved the predicted way,
-   with no regression elsewhere.
+   with no regression elsewhere. Diff the before/after profiles directly with
+   `go tool pprof -diff_base=before.pb.gz after.pb.gz` (signed delta; improvements negative) - or
+   `-base` to subtract the baseline - so the change is the subject, not eyeballed side by side.
+   See `go tool pprof -help` for the comparison flags.
+For a `gc`-pattern win (sync-pool, reduce-pointers-gc, slice/map reuse), the benchstat allocs/op
+drop is the local proxy; confirm the real effect in production with `GODEBUG=gctrace=1` (GC
+frequency / pause) and the process's GOGC / GOMEMLIMIT, since GC CPU and pauses do not show up in
+a microbenchmark's ns/op. For a gc-bound service, also surface the zero-code lever: raising GOGC or
+setting GOMEMLIMIT (soft cap, Go 1.19+) can cut GC CPU or prevent OOM with no source change. This
+is a config recommendation, not a catalog hypothesis (no source site, no benchstat micro-gate), so
+report it separately and validate it against the production heap profile.
 Only then is the finding confirmed. Never present a proved hypothesis as "done".
 
 ## Parallel validation
