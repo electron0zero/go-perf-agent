@@ -1,29 +1,32 @@
 # go-perf-agent
 
-An LLM-assisted agent that audits a Go codebase for performance and proposes optimizations that
-are proven, not guessed.
+go-perf-agent finds where a Go service is slow from real telemetry, proposes one optimization at a
+time, and reports it as proven only when [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
+says so. You get a short, grounded list worth shipping instead of speculation.
 
-It pulls real data - [Tempo](https://github.com/grafana/tempo) traces and [Pyroscope](https://github.com/grafana/pyroscope) profiles (via the
-[`gcx`](https://github.com/grafana/gcx) CLI), or a local [`go pprof`](https://pkg.go.dev/runtime/pprof) profile when neither is set up - ranks the hot code,
-forms hypotheses from a catalog of common Go performance patterns, and tests each in an isolated git
-worktree with benchmarks. A change is reported as proven only when [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat) says so, so you get a short,
-grounded list worth shipping instead of speculation.
+It is a hybrid: a single Go binary does the deterministic work (collect telemetry, rank hot code,
+run an interleaved benchmark gate), and a [Claude Code](https://docs.claude.com/en/docs/claude-code)
+skill plus four agents do the reasoning (form a hypothesis, apply one change, author a missing
+benchmark). Hard numbers decide keep or reject, never the model.
 
-The tool is a single Go binary, the loop is a [Claude Code](https://docs.claude.com/en/docs/claude-code) skill plus four agents.
+Data comes from the Grafana stack via the [`gcx`](https://github.com/grafana/gcx) CLI:
+[Tempo](https://github.com/grafana/tempo) traces find the slow operation, then
+[Pyroscope](https://github.com/grafana/pyroscope) profiles explain it at the code level. With no
+`gcx`, it falls back to a local [`go pprof`](https://pkg.go.dev/runtime/pprof) profile.
 
 ## How it works
 
-The skill orchestrates; four agents do the reasoning; the Go binary does the deterministic work.
-They connect through files under `.go-perf-agent/` (the source of truth), not direct messages.
+The skill orchestrates; four agents reason; the Go binary does the deterministic work. They
+connect through files under `.go-perf-agent/`, not direct messages.
 
 ```mermaid
 flowchart TD
-    user([USER]) --> rank["RANK<br/>production telemetry (via gcx) or code diff.<br/> used to build ranked hotspots in codebase"]
+    user([USER]) --> rank["RANK<br/>prod: traces find the slow operation, then profiles for it (via gcx).<br/>local or PR diff: profile / changed funcs. builds ranked hotspots"]
     rank --> hyp["HYPOTHESIZE<br/>one hypothesis per code hotspot"]
     hyp -->|"per hotspot"| hyp
-    hyp --> val["VALIDATE<br/>one change in a worktree. <br/> each hypothesis is either proved, rejected, or needs more data"]
+    hyp --> val["VALIDATE<br/>one change in a worktree.<br/>each hypothesis is proved, rejected, or needs more data"]
     val -->|"per hypothesis"| val
-    val --> critic["CRITIQUE<br/>only proved hypothesis. <br/>it can only downgrade a hypothesis"]
+    val --> critic["CRITIQUE<br/>proved hypotheses only.<br/>can only downgrade"]
     critic --> report["REPORT<br/>.go-perf-agent/report.md"]
     report --> ship([USER ships and verifies in prod])
 
@@ -31,118 +34,96 @@ flowchart TD
     class rank,hyp,val,critic,report step;
 ```
 
-Each stage is a Claude Code agent; the deterministic work (ranking, benchmarks, the benchstat gate)
-is the Go binary. Stages connect through files under `.go-perf-agent/`, not direct messages; the
-self-loops run once per hotspot / hypothesis. `bench-regression` (base-vs-head) and `eval` (golden
-scenarios) are separate entry points, not shown.
+`bench-regression` (base-vs-head) and `eval` (golden scenarios) are separate entry points, not shown.
 
 ## How to use
 
 Prerequisites: Go 1.23+, `git`, and `benchstat`
 (`go install golang.org/x/perf/cmd/benchstat@latest`). For production telemetry, also install and
-authenticate [`gcx`](https://github.com/grafana/gcx) (`gcx auth login`) - optional but
-recommended, since local profiling can mislead.
+authenticate [`gcx`](https://github.com/grafana/gcx) (`gcx auth login`).
 
 ```bash
 go build -o go-perf-agent .     # or: go install .
 ```
 
-Run it as an agent (recommended): load this repo's `.claude/` (run Claude Code from here, or copy
+Recommended: run it as an agent. Load this repo's `.claude/` (run Claude Code from here, or copy
 `.claude/skills/go-perf-agent` and `.claude/agents/gpa-*.md` into the target repo or `~/.claude/`),
-then invoke the `go-perf-agent` skill from the target module root. It asks what to audit, drives
-the loop, and writes `.go-perf-agent/report.md`. See Use cases for what to tell it, and
-`.claude/skills/go-perf-agent/SKILL.md` for the full loop, gate, and config.
+then invoke the `go-perf-agent` skill from the target module root. It asks what to audit, drives the
+loop, and writes `.go-perf-agent/report.md`. See `.claude/skills/go-perf-agent/SKILL.md` for the
+full loop, gate, and config.
 
 ## Use cases
 
-The same loop runs from three starting points. A running service (telemetry-driven) is the main
-one - it ranks the whole in-scope codebase by what is actually hot in production. The two
-diff-driven modes reuse the same gates on a smaller, changed-code candidate set.
+The same gate runs from three starting points.
 
-### 1. A production service - start from a service + time window
+### 1. A production service (traces-first)
 
-Invoke the skill with the service and window, e.g. "audit `tempo-ingester` over the last 1h, scope
-`pkg/parquet` and `tempodb`"; it asks for anything missing (datasource UID, etc.) and runs the loop.
-
-By hand:
+Tell the skill the service and window, e.g. "audit `tempo-ingester` over the last 1h, scope
+`pkg/parquet` and `tempodb`". By hand, production goes traces-first: find the slow operation, then
+profile that work.
 
 ```bash
 go-perf-agent scope --include "pkg/parquet,tempodb" --exclude "vendor"
-go-perf-agent collect-profiles --service tempo-ingester --window 1h   # cpu + alloc leaders (gcx)
-#   no gcx? profile locally: go-perf-agent collect-local --pkg ./pkg/parquet --bench BenchmarkDecode
-go-perf-agent collect-traces   --service tempo-ingester --window 1h --ds-uid <tempo-uid>  # optional
-go-perf-agent hotspots                                                # ranked candidates
+go-perf-agent collect-traces    --service tempo-ingester --window 1h --ds-uid <tempo-uid>   # 1. slowest operations
+go-perf-agent collect-exemplars --service tempo-ingester --window 1h --ds-uid <pyro-uid>    # 2. profile UUIDs for that work
+go-perf-agent collect-profiles  --service tempo-ingester --window 1h --ds-uid <pyro-uid> --profile-id <uuid>   # 3. pprof
+go-perf-agent hotspots                                                                       # ranked candidates
 #   form hypotheses (skill/agents) -> validate each -> report
 go-perf-agent report
 ```
 
-After a proved change ships behind a flag, re-run `collect-profiles` + `hotspots` and confirm the
-hot symbol's weight actually dropped in production - the local benchmark is necessary, not sufficient.
+If exemplars come back empty (no span-aware instrumentation), drop `--profile-id` and pull the
+service-wide profile; the trace step still localized the slow service. After a proved change ships
+behind a flag, re-run the same queries and confirm the hot symbol's weight dropped in production.
 
-### 2. A GitHub PR - review the changed code
+### 2. A GitHub PR
 
-Two goals, both reuse the gate: optimize the code the PR touched, and/or check it did not make a
-changed function slower.
+Optimize the code the PR touched and check it did not make a changed function slower.
 
 ```bash
-go-perf-agent target-diff --pr https://github.com/org/repo/pull/123   # triage: changed funcs -> candidates (reads the patch via gh, no checkout)
-
-gh pr checkout 123                                                    # to optimize: validation edits in a worktree, so check the PR out
+go-perf-agent target-diff --pr https://github.com/org/repo/pull/123   # triage: changed funcs -> candidates (reads the patch via gh)
+gh pr checkout 123                                                    # to optimize, check the PR out (validation edits a worktree)
 go-perf-agent target-diff --base main                                 # changed funcs -> candidates + scope
-#   form hypotheses on the changed funcs -> validate -> report
-
-go-perf-agent bench-regression --pkg ./pkg/x --bench BenchmarkY --base main   # did the PR regress? -> REGRESSION | CLEAN | INCONCLUSIVE
+go-perf-agent bench-regression --pkg ./pkg/x --bench BenchmarkY --base main   # regressed? -> REGRESSION | CLEAN | INCONCLUSIVE
 ```
 
-### 3. A local diff - work in progress
+### 3. A local diff (work in progress)
 
-The PR case for your own changes, before you open a PR - point it at uncommitted work or your
-branch's commits.
+The PR case for your own changes, before you open a PR.
 
 ```bash
-go-perf-agent target-diff                 # default: working-tree changes vs HEAD (uncommitted)
+go-perf-agent target-diff                 # default: working-tree changes vs HEAD
 go-perf-agent target-diff --base main     # or: your branch's commits vs main
-#   form hypotheses on the changed funcs -> validate -> report
 go-perf-agent bench-regression --pkg ./pkg/x --bench BenchmarkY --base main   # optional regression check
 ```
 
-## When to use this tooling
-
-Good fits:
-- A Go service with Pyroscope/Tempo telemetry, where you want code-level wins backed by real data.
-- A hot package or function (or a local profile) you want hypotheses tested on, not just listed.
-- Auditing part of a large repo while keeping it off vendored/generated code.
-
-Not a good fit:
-- Micro-tuning with no signal.
-- A substitute for production validation - a local benchmark win is a starting point, not proof.
+No `gcx`? Profile locally instead of the trace/profile steps: `go-perf-agent collect-local --pkg
+./pkg/x --bench BenchmarkY`, then `hotspots`. Local is the only profiles-first path.
 
 ## Things to keep in mind
 
-- External tools must be on PATH: `go`, `benchstat`, `git`, `gh`, and `gcx`.
 - Every finding is a hypothesis. A PROVED verdict is a local-benchmark win, not truth: production
-  has different hardware, inputs, and load. Interleaved baseline/candidate runs cancel machine
-  noise but not that - always re-check the same telemetry in production before trusting a change.
+  has different hardware, inputs, and load. Always re-check the same telemetry in production before
+  trusting a change.
 - Results are only as good as the machine. A noisy laptop widens confidence intervals and pushes
-  borderline wins to `need_more_data`; run on an idle machine on power for the best results.
-- Changes are made in throwaway worktrees under `.go-perf-agent/wt/`; proved ones are left for you
-  to review (`git -C <wt> diff`) and cherry-pick.
-- Without `scope`, the whole codebase is in play. Use `--include`/`--exclude` to keep the agents on
-  the code you care about and off vendored, generated, or frozen packages.
-- `gcx auth` is needed for production telemetry. Without it the agent profiles locally and asks you
-  for a target package/function (and a benchmark, which it can author).
+  borderline wins to `need_more_data`; run on an idle machine connected to power (not on battery,
+  where CPU throttling skews timings) for the most stable results.
+- Without `scope`, the whole codebase is in play. Use `--include`/`--exclude` to keep the agents off
+  vendored, generated, or frozen packages.
+- Changes happen in throwaway worktrees under `.go-perf-agent/wt/`; proved ones are left for you to
+  review (`git -C <wt> diff`) and cherry-pick.
+- External tools must be on PATH: `go`, `benchstat`, `git`, `gh`, and `gcx`.
 
 ## Acknowledgements
 
-Built on the Grafana LGTM stack and [Pyroscope](https://github.com/grafana/pyroscope), the
-[`gcx`](https://github.com/grafana/gcx) CLI, Go's
-[`pprof`](https://pkg.go.dev/runtime/pprof) and
-[`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), and
-[`alecthomas/kong`](https://github.com/alecthomas/kong).
+Built with open source:
+- [Tempo](https://github.com/grafana/tempo),
+- [Pyroscope](https://github.com/grafana/pyroscope)
+- [`gcx`](https://github.com/grafana/gcx) CLI
+- Go's [`pprof`](https://pkg.go.dev/runtime/pprof), [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat),
+- [`alecthomas/kong`](https://github.com/alecthomas/kong) for CLI flags,
 
-## Credits
-
-The Go performance pattern catalog is built from Dave Cheney's High Performance Go Workshop and
-Bryan Boreham's fork:
+The performance pattern catalog is built from Dave Cheney's High Performance Go Workshop and Bryan
+Boreham's fork:
 - https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html
 - https://github.com/bboreham/high-performance-go-workshop
