@@ -3,160 +3,27 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// collect-profiles: pull pyroscope cpu+alloc leaderboards via gcx. These are the primary
-// code-level signal (ranked heaviest functions).
-type collectProfilesCmd struct {
-	Service string `required:"" help:"service_name to profile"`
-	Window  string `default:"1h" help:"Time window, e.g. 1h"`
-	From    string `help:"Start (RFC3339 / unix / now-1h); overrides --window"`
-	To      string `help:"End; overrides --window"`
-	Limit   int    `default:"30" help:"Leaderboard size"`
-}
-
-func (c *collectProfilesCmd) Run() error {
-	ensureDirs()
-
-	sel := fmt.Sprintf(`{service_name="%s"}`, c.Service)
-	timeFlags := []string{"--window", c.Window}
-	if c.From != "" || c.To != "" {
-		f, t := c.From, c.To
-		if f == "" {
-			f = "now-1h"
-		}
-		if t == "" {
-			t = "now"
-		}
-		timeFlags = []string{"--from", f, "--to", t}
-	}
-
-	// cpu (time), alloc (churn), inuse (resident heap - the OOM signal). hotspots ranks each
-	// metric separately, so collecting all three keeps memory-residency a first-class signal.
-	collected := 0
-	for _, k := range []struct{ kind, pt string }{
-		{"cpu", cpuPT},
-		{"alloc", allocPT},
-		{"inuse", inusePT},
-	} {
-		kind, pt := k.kind, k.pt
-		out := filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.leaderboard.json", safeServiceName(c.Service), kind))
-		info("pyroscope %s flamegraph -> %s", kind, out)
-		// query (flamegraph), not series --top: series ranks label groups, so a fixed
-		// service_name selector yields one row, not a per-function breakdown.
-		gcxArgs := []string{"datasources", "pyroscope", "query"}
-		if pyroDS != "" {
-			gcxArgs = append(gcxArgs, pyroDS)
-		}
-		gcxArgs = append(gcxArgs, sel, "--profile-type", pt)
-		gcxArgs = append(gcxArgs, timeFlags...)
-		gcxArgs = append(gcxArgs, "-o", "json")
-		stdout, stderr, err := run("", "gcx", gcxArgs...)
-		if err != nil {
-			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
-			fmt.Fprint(os.Stderr, stderr)
-			info("  %s query failed, skipping: %v", kind, err)
-			continue
-		}
-		rows, err := flamegraphLeaderboard(stdout, c.Limit)
-		if err != nil {
-			info("  %s: %v (skipping)", kind, err)
-			continue
-		}
-		if err := writeJSON(out, rows); err != nil {
-			return err
-		}
-		collected++
-	}
-	if collected == 0 {
-		return fmt.Errorf("pyroscope query returned no profile for any type of %q (run 'gcx auth login' if the session expired)", c.Service)
-	}
-	fmt.Println(filepath.Join(gpaDir, "profiles"))
-	return nil
-}
-
-// gcx service_name values can contain a slash (e.g. "namespace/component"); flatten it so
-// outputs stay flat in profiles/ instead of spawning a subdir.
-func safeServiceName(s string) string {
-	return strings.NewReplacer("/", "-", " ", "_").Replace(s)
-}
-
-// flamebearer is the flamegraph shape gcx pyroscope query returns: names indexed by node, and
-// levels of [offset,total,self,nameIdx,...] quads encoded as strings.
-type flamebearer struct {
-	Flamegraph struct {
-		Names  []string `json:"names"`
-		Levels []struct {
-			Values []string `json:"values"`
-		} `json:"levels"`
-	} `json:"flamegraph"`
-}
-
-type leaderboardRow struct {
-	Function string  `json:"function"`
-	Value    float64 `json:"value"`
-}
-
-// flamegraphLeaderboard sums self weight per function across the flamegraph - the code-level
-// signal hotspots ranks. Returns the top `limit` functions by self weight.
-func flamegraphLeaderboard(stdout string, limit int) ([]leaderboardRow, error) {
-	var fb flamebearer
-	if err := json.Unmarshal([]byte(stdout), &fb); err != nil {
-		return nil, fmt.Errorf("parse flamegraph json: %w", err)
-	}
-	names := fb.Flamegraph.Names
-	if len(names) == 0 {
-		return nil, fmt.Errorf("flamegraph has no functions (empty profile for this service/window?)")
-	}
-	self := make([]float64, len(names))
-	for _, lvl := range fb.Flamegraph.Levels {
-		for i := 0; i+3 < len(lvl.Values); i += 4 {
-			s, _ := strconv.ParseFloat(lvl.Values[i+2], 64)
-			ni, _ := strconv.Atoi(lvl.Values[i+3])
-			if ni >= 0 && ni < len(self) {
-				self[ni] += s
-			}
-		}
-	}
-	var rows []leaderboardRow
-	for i, name := range names {
-		if self[i] > 0 && name != "total" && name != "other" {
-			rows = append(rows, leaderboardRow{Function: name, Value: self[i]})
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Value > rows[j].Value })
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
-	}
-	return rows, nil
-}
-
-// collect-traces: gcx has no `tempo query`, so we go through the datasource proxy. Traces
-// localize the slow operation (secondary signal).
+// collect-traces: the FIRST step for production telemetry. TraceQL finds the slow operations;
+// the agent then pivots to profiles (collect-exemplars + collect-profiles) for that hot service.
+// Uses `gcx datasources tempo query` (native search; replaces the old datasource-proxy hack).
 type collectTracesCmd struct {
-	Service   string `help:"resource.service.name to match (for self-observability traces this may carry a deployment prefix, e.g. tempo-querier, not just querier)"`
-	Namespace string `help:"Scope the default query to one cluster via resource.namespace; omit to search every cluster the datasource sees"`
-	Query     string `help:"Explicit TraceQL (overrides the --service/--namespace default)"`
-	Window    string `default:"1h" help:"Time window, e.g. 1h or 30m"`
-	DSUID     string `name:"ds-uid" help:"Tempo datasource UID (or GPA_TEMPO_DS_UID)"`
-	Limit     int    `default:"20" help:"Max traces"`
+	Service     string `help:"resource.service.name to match (for self-observability traces this may carry a deployment prefix, e.g. tempo-querier, not just querier)"`
+	Namespace   string `help:"Scope the default query to one cluster via resource.namespace; omit to search every cluster the datasource sees"`
+	Query       string `help:"Explicit TraceQL (overrides the --service/--namespace/--min-duration default)"`
+	MinDuration string `default:"500ms" help:"Slow-span threshold for the default query, e.g. 500ms or 1s"`
+	Window      string `default:"1h" help:"Time window, e.g. 1h or 30m (passed to gcx --since)"`
+	DSUID       string `name:"ds-uid" help:"Tempo datasource UID (or GPA_TEMPO_DS_UID); omit if datasources.tempo is configured in your gcx context"`
+	Limit       int    `default:"20" help:"Max traces"`
 }
 
 func (c *collectTracesCmd) Run() error {
-	uid := c.DSUID
-	if uid == "" {
-		uid = tempoDSUID
-	}
-	if uid == "" {
-		return fmt.Errorf("collect-traces: --ds-uid or GPA_TEMPO_DS_UID required (gcx tempo query is not implemented; we use the datasource proxy)")
-	}
 	ensureDirs()
 
 	q := c.Query
@@ -170,36 +37,191 @@ func (c *collectTracesCmd) Run() error {
 		if c.Namespace != "" {
 			sel = append(sel, fmt.Sprintf(`resource.namespace = "%s"`, c.Namespace))
 		}
-		sel = append(sel, "duration > 500ms")
+		sel = append(sel, "duration > "+c.MinDuration)
 		q = "{ " + strings.Join(sel, " && ") + " }"
 	}
-	now := time.Now().Unix()
-	since := now - int64(windowSeconds(c.Window))
-	path := fmt.Sprintf("/api/datasources/proxy/uid/%s/api/search?q=%s&limit=%d&start=%d&end=%d",
-		uid, url.QueryEscape(q), c.Limit, since, now)
-	name := nameOr(c.Service, "search")
+
+	gcxArgs := []string{"datasources", "tempo", "query", q, "--since", c.Window, "--limit", strconv.Itoa(c.Limit), "-o", "json"}
+	if uid := dsOrEnv(c.DSUID, tempoDSUID); uid != "" {
+		gcxArgs = append(gcxArgs, "-d", uid)
+	}
+
+	name := c.Service
+	if name == "" {
+		name = "search"
+	}
 	if c.Namespace != "" { // keep per-namespace outputs distinct so probing doesn't overwrite
 		name += "-" + c.Namespace
 	}
 	out := filepath.Join(gpaDir, "traces", safeServiceName(name)+".json")
-	info("tempo search via proxy -> %s", out)
-	info("  query: %s", q)
+	info("tempo query -> %s", out)
+	info("  TraceQL: %s", q)
 
-	stdout, stderr, err := run("", "gcx", "api", path, "-o", "json")
+	stdout, stderr, err := run("", "gcx", gcxArgs...)
 	if err != nil {
 		fmt.Fprint(os.Stderr, stderr)
-		return fmt.Errorf("tempo proxy query failed (check --ds-uid; run 'gcx auth login' if expired)")
+		return fmt.Errorf("tempo query failed: %w (run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
 	}
 	if err := os.WriteFile(out, []byte(stdout), 0o644); err != nil {
 		return err
 	}
-	fmt.Println(out)
+	summarizeTraces(stdout)
+	info("next: pull profiles for the hot service - collect-exemplars then collect-profiles")
+	return nil
+}
+
+// tempoSearch is the slice of the gcx/Tempo search response we rank by; a small local struct,
+// not a tempo import (only these fields matter for picking the slow operation).
+type tempoSearch struct {
+	Traces []struct {
+		TraceID         string `json:"traceID"`
+		RootServiceName string `json:"rootServiceName"`
+		RootTraceName   string `json:"rootTraceName"`
+		DurationMs      int    `json:"durationMs"`
+	} `json:"traces"`
+}
+
+// summarizeTraces prints the slowest operations so the user (and agent) can see which service to
+// profile next. Best-effort: a parse failure just skips the summary, the raw JSON is already saved.
+func summarizeTraces(stdout string) {
+	var r tempoSearch
+	if json.Unmarshal([]byte(stdout), &r) != nil || len(r.Traces) == 0 {
+		return
+	}
+	sort.Slice(r.Traces, func(i, j int) bool { return r.Traces[i].DurationMs > r.Traces[j].DurationMs })
+	info("slowest operations (rank by duration):")
+	for i, t := range r.Traces {
+		if i >= 10 {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "  %dms  %s  %s\n", t.DurationMs, t.RootServiceName, t.RootTraceName)
+	}
+}
+
+// collect-exemplars: the trace->profile pivot. Span/profile exemplars link a hot service's
+// profiles to concrete profile UUIDs (and trace spans when instrumented with otelpyroscope). The
+// agent reads the profileIds and feeds them to collect-profiles --profile-id to scope the profile
+// to the slow work. Requires gcx with `pyroscope exemplars` (recent builds).
+type collectExemplarsCmd struct {
+	Service     string `required:"" help:"service_name to query exemplars for"`
+	Kind        string `default:"profile" enum:"profile,span" help:"profile (profileId for drilling) or span (spanId, links to traces)"`
+	ProfileType string `help:"Pyroscope profile-type ID (default: cpu)"`
+	Window      string `default:"1h" help:"Time window, e.g. 1h (passed to gcx --since)"`
+	DSUID       string `name:"ds-uid" help:"Pyroscope datasource UID (or GPA_PYRO_DS); omit if configured in your gcx context"`
+	TopN        int    `default:"100" help:"Max exemplars"`
+}
+
+func (c *collectExemplarsCmd) Run() error {
+	ensureDirs()
+	pt := c.ProfileType
+	if pt == "" {
+		pt = cpuPT
+	}
+	sel := fmt.Sprintf(`{service_name="%s"}`, c.Service)
+	gcxArgs := []string{"datasources", "pyroscope", "exemplars", c.Kind, sel,
+		"--profile-type", pt, "--since", c.Window, "--top-n", strconv.Itoa(c.TopN), "-o", "json"}
+	if uid := dsOrEnv(c.DSUID, pyroDS); uid != "" {
+		gcxArgs = append(gcxArgs, "-d", uid)
+	}
+
+	out := filepath.Join(gpaDir, "profiles", safeServiceName(c.Service)+".exemplars."+c.Kind+".json")
+	info("pyroscope %s exemplars -> %s", c.Kind, out)
+	stdout, stderr, err := run("", "gcx", gcxArgs...)
+	if err != nil {
+		fmt.Fprint(os.Stderr, stderr)
+		return fmt.Errorf("pyroscope exemplars failed: %w (needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
+	}
+	if err := os.WriteFile(out, []byte(stdout), 0o644); err != nil {
+		return err
+	}
+	summarizeExemplars(stdout)
+	info("next: collect-profiles --service %s --profile-id <uuid> ... to scope the profile to these", c.Service)
+	return nil
+}
+
+type exemplarsResult struct {
+	Exemplars []struct {
+		ProfileID string `json:"profileId"`
+		SpanID    string `json:"spanId"`
+		Value     int64  `json:"value"`
+	} `json:"exemplars"`
+}
+
+func summarizeExemplars(stdout string) {
+	var r exemplarsResult
+	if json.Unmarshal([]byte(stdout), &r) != nil || len(r.Exemplars) == 0 {
+		info("  no exemplars (service may lack span-aware instrumentation); fall back to a service-wide profile")
+		return
+	}
+	sort.Slice(r.Exemplars, func(i, j int) bool { return r.Exemplars[i].Value > r.Exemplars[j].Value })
+	info("top exemplars by weight (profileId / spanId):")
+	for i, e := range r.Exemplars {
+		if i >= 10 {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "  %d  %s  %s\n", e.Value, e.ProfileID, e.SpanID)
+	}
+}
+
+// collect-profiles: pull pyroscope cpu/alloc/inuse profiles via gcx as real pprof (.pb.gz), which
+// hotspots parses with the same google/pprof path as a local profile. Pass --profile-id (from
+// collect-exemplars) to scope the profile to the slow spans the traces identified.
+type collectProfilesCmd struct {
+	Service     string   `required:"" help:"service_name to profile"`
+	ProfileIDs  []string `name:"profile-id" help:"Drill into specific profile UUIDs from collect-exemplars (repeatable)"`
+	ProfileType string   `help:"Single profile-type ID; default collects cpu+alloc+inuse"`
+	Window      string   `default:"1h" help:"Time window, e.g. 1h (passed to gcx --since)"`
+	DSUID       string   `name:"ds-uid" help:"Pyroscope datasource UID (or GPA_PYRO_DS); omit if configured in your gcx context"`
+}
+
+func (c *collectProfilesCmd) Run() error {
+	ensureDirs()
+
+	// cpu (time), alloc (churn), inuse (resident heap - the OOM signal). hotspots ranks each
+	// metric separately, so collecting all three keeps memory-residency a first-class signal.
+	types := []struct{ kind, pt string }{{"cpu", cpuPT}, {"alloc", allocPT}, {"inuse", inusePT}}
+	// a single profile-type (or a --profile-id drill, which is per-type) collects just that one.
+	if c.ProfileType != "" {
+		types = []struct{ kind, pt string }{{"profile", c.ProfileType}}
+	} else if len(c.ProfileIDs) > 0 {
+		types = []struct{ kind, pt string }{{"cpu", cpuPT}}
+	}
+
+	sel := fmt.Sprintf(`{service_name="%s"}`, c.Service)
+	uid := dsOrEnv(c.DSUID, pyroDS)
+	collected := 0
+	for _, k := range types {
+		dest := mustAbs(filepath.Join(gpaDir, "profiles", fmt.Sprintf("%s.%s.pb.gz", safeServiceName(c.Service), k.kind)))
+		info("pyroscope %s profile -> %s", k.kind, dest)
+		gcxArgs := []string{"datasources", "pyroscope", "query", sel,
+			"--profile-type", k.pt, "--since", c.Window,
+			"-o", "pprof", "--pprof-path", dest, "--pprof-overwrite"}
+		if uid != "" {
+			gcxArgs = append(gcxArgs, "-d", uid)
+		}
+		for _, id := range c.ProfileIDs {
+			gcxArgs = append(gcxArgs, "--profile-id", id)
+		}
+		_, stderr, err := run("", "gcx", gcxArgs...)
+		if err != nil {
+			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
+			fmt.Fprint(os.Stderr, stderr)
+			info("  %s query failed, skipping: %v", k.kind, err)
+			continue
+		}
+		collected++
+	}
+	if collected == 0 {
+		return fmt.Errorf("pyroscope query returned no profile for %q (run 'gcx auth login' if the session expired)", c.Service)
+	}
+	info("next: go-perf-agent hotspots")
 	return nil
 }
 
 // collect-local: profile a benchmark in this repo with go's own pprof - no Grafana needed.
 // This is the fallback when gcx is not set up: point it at the package (and optionally the
-// function) the user wants to target, then run hotspots on the resulting profiles.
+// function) the user wants to target, then run hotspots on the resulting profiles. Local is the
+// only profiles-first path; production starts from traces.
 type collectLocalCmd struct {
 	Pkg       string `default:"." help:"single package to benchmark (e.g. ./pkg/parquet) - not ./..."`
 	Bench     string `default:"." help:"benchmark name regex to profile (e.g. BenchmarkDecode)"`
@@ -219,27 +241,21 @@ func (c *collectLocalCmd) Run() error {
 		fmt.Fprint(os.Stderr, stderr)
 		return fmt.Errorf("local profiling failed (need a single package with a benchmark matching %q in %s)", c.Bench, c.Pkg)
 	}
-	info("wrote profiles; now run: go-perf-agent hotspots")
+	info("next: go-perf-agent hotspots")
 	return nil
 }
 
-func windowSeconds(w string) int {
-	if strings.HasSuffix(w, "h") {
-		if n, err := strconv.Atoi(strings.TrimSuffix(w, "h")); err == nil {
-			return n * 3600
-		}
-	}
-	if strings.HasSuffix(w, "m") {
-		if n, err := strconv.Atoi(strings.TrimSuffix(w, "m")); err == nil {
-			return n * 60
-		}
-	}
-	return 3600
+// gcx service_name values can contain a slash (e.g. "namespace/component"); flatten it so
+// outputs stay flat in profiles/ instead of spawning a subdir.
+func safeServiceName(s string) string {
+	return strings.NewReplacer("/", "-", " ", "_").Replace(s)
 }
 
-func nameOr(s, def string) string {
-	if s == "" {
-		return def
+// dsOrEnv prefers the explicit flag, then the env-configured default, then empty (let gcx resolve
+// the datasource from its context config).
+func dsOrEnv(flag, envDefault string) string {
+	if flag != "" {
+		return flag
 	}
-	return s
+	return envDefault
 }

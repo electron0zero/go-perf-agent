@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,7 @@ import (
 )
 
 type rawHot struct {
-	val    float64 // raw self weight: absolute (pyroscope leaderboard) or flat% (local pprof)
+	val    float64 // raw self weight (flat self) summed from the profile's leaf frames
 	symbol string
 	metric string
 	source string
@@ -58,7 +57,7 @@ func gatherHotspots(pprof string, topn int) ([]Hotspot, error) {
 
 	var raws []rawHot
 
-	// source 1: pprof files (cpu/alloc) via `go tool pprof -top`
+	// pprof files: gcx-collected (.pb.gz) and local go-test profiles (.prof) parse the same way.
 	var profs []string
 	if pprof != "" {
 		profs = []string{pprof}
@@ -81,12 +80,6 @@ func gatherHotspots(pprof string, topn int) ([]Hotspot, error) {
 		raws = append(raws, rs...)
 	}
 
-	// source 2: pyroscope leaderboards (json)
-	lbs, _ := filepath.Glob(filepath.Join(gpaDir, "profiles", "*.leaderboard.json"))
-	for _, lb := range lbs {
-		raws = append(raws, parseLeaderboard(lb, leaderboardMetric(lb))...)
-	}
-
 	if len(raws) == 0 {
 		return nil, fmt.Errorf("no profiles found. Run collect-profiles/collect-local, pass --pprof FILE, or run selftest")
 	}
@@ -96,19 +89,6 @@ func gatherHotspots(pprof string, topn int) ([]Hotspot, error) {
 		info("scope: include=%v exclude=%v", sc.Include, sc.Exclude)
 	}
 	return rankHotspots(raws, sc), nil
-}
-
-// leaderboardMetric derives the metric from the leaderboard filename. inuse (resident heap) is
-// its own metric, distinct from alloc (churn) - they rank differently and must not be blended.
-func leaderboardMetric(path string) string {
-	switch {
-	case strings.Contains(path, ".alloc."):
-		return "alloc"
-	case strings.Contains(path, ".inuse."):
-		return "inuse"
-	default:
-		return "cpu"
-	}
 }
 
 // rankHotspots aggregates raw self weights by (symbol, metric) across every profile, then
@@ -203,12 +183,17 @@ func parsePprof(path string, topn int) ([]rawHot, error) {
 		}
 	}
 
+	// local profiles are written as local.*.prof; gcx-collected ones come from pyroscope.
+	source := "pyroscope"
+	if strings.HasPrefix(filepath.Base(path), "local.") {
+		source = "local-pprof"
+	}
 	byMetric := map[string][]rawHot{}
 	for k, v := range flat {
 		if v <= 0 {
 			continue
 		}
-		byMetric[k.metric] = append(byMetric[k.metric], rawHot{val: v, symbol: k.fn, metric: k.metric, source: "local-pprof"})
+		byMetric[k.metric] = append(byMetric[k.metric], rawHot{val: v, symbol: k.fn, metric: k.metric, source: source})
 	}
 	var hs []rawHot
 	for _, rs := range byMetric {
@@ -219,28 +204,6 @@ func parsePprof(path string, topn int) ([]rawHot, error) {
 		hs = append(hs, rs...)
 	}
 	return hs, nil
-}
-
-// parseLeaderboard reads a leaderboard file written by collect-profiles: a JSON array of
-// {function, value} rows where value is absolute self weight. rankHotspots normalizes per metric.
-func parseLeaderboard(path, kind string) []rawHot {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var rows []leaderboardRow
-	if json.Unmarshal(b, &rows) != nil {
-		info("  skipping unparseable leaderboard %s", path)
-		return nil
-	}
-	var hs []rawHot
-	for _, r := range rows {
-		if r.Function == "" {
-			continue
-		}
-		hs = append(hs, rawHot{val: r.Value, symbol: r.Function, metric: kind, source: "pyroscope"})
-	}
-	return hs
 }
 
 func round4(f float64) float64 {

@@ -8,21 +8,6 @@ import (
 	"github.com/google/pprof/profile"
 )
 
-func TestLeaderboardMetric(t *testing.T) {
-	cases := map[string]string{
-		"svc.cpu.leaderboard.json":   "cpu",
-		"svc.alloc.leaderboard.json": "alloc",
-		"svc.inuse.leaderboard.json": "inuse", // bug fix: inuse is its own metric, not "alloc"
-		"weird.leaderboard.json":     "cpu",   // default
-		"a/b/svc.inuse.leaderboard.json": "inuse",
-	}
-	for path, want := range cases {
-		if got := leaderboardMetric(path); got != want {
-			t.Errorf("leaderboardMetric(%q) = %q, want %q", path, got, want)
-		}
-	}
-}
-
 func TestParsePprof(t *testing.T) {
 	// build a real cpu profile: foo flat = 100+50, bar flat = 30; parse it back
 	foo := &profile.Function{ID: 1, Name: "github.com/grafana/tempo/pkg/a.foo"}
@@ -69,28 +54,6 @@ func TestParsePprof(t *testing.T) {
 	// topn caps per metric
 	if top1, _ := parsePprof(path, 1); len(top1) != 1 || top1[0].symbol != "github.com/grafana/tempo/pkg/a.foo" {
 		t.Errorf("topn=1 gave %+v, want just foo (flat 150)", top1)
-	}
-}
-
-func TestParseLeaderboardAbsoluteValues(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "svc.alloc.leaderboard.json")
-	// collect-profiles writes {function,value} rows; a row without a function name is skipped
-	writeFile(t, p, `[{"function":"a","value":300},{"function":"b","value":100},{"value":5}]`)
-
-	got := parseLeaderboard(p, "alloc")
-	// absolute values are preserved (normalization happens later in rankHotspots), not per-file pct
-	want := map[string]float64{"a": 300, "b": 100}
-	if len(got) != 2 {
-		t.Fatalf("got %d rows, want 2 (nameless row skipped)", len(got))
-	}
-	for _, r := range got {
-		if r.val != want[r.symbol] {
-			t.Errorf("symbol %q val = %v, want %v", r.symbol, r.val, want[r.symbol])
-		}
-		if r.metric != "alloc" {
-			t.Errorf("symbol %q metric = %q, want alloc", r.symbol, r.metric)
-		}
 	}
 }
 
@@ -146,8 +109,31 @@ func TestRankHotspotsAggregatesAcrossFiles(t *testing.T) {
 	}
 }
 
-// gatherHotspots end-to-end: reads leaderboard files from gpaDir, labels metrics from filenames,
-// keeps a symbol per metric, and tags editability. Guards the inuse-vs-alloc + blend bugs.
+// writePprof writes a single-sample-type pprof to path: one {function: flat-value} pair per entry.
+func writePprof(t *testing.T, path, sampleType, unit string, flat map[string]int64) {
+	t.Helper()
+	p := &profile.Profile{SampleType: []*profile.ValueType{{Type: sampleType, Unit: unit}}}
+	var id uint64
+	for name, v := range flat {
+		id++
+		fn := &profile.Function{ID: id, Name: name}
+		loc := &profile.Location{ID: id, Line: []profile.Line{{Function: fn}}}
+		p.Function = append(p.Function, fn)
+		p.Location = append(p.Location, loc)
+		p.Sample = append(p.Sample, &profile.Sample{Location: []*profile.Location{loc}, Value: []int64{v}})
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := p.Write(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gatherHotspots end-to-end: parses gcx-collected pprof files from gpaDir, keeps a symbol per
+// metric, and tags editability. Guards the inuse-vs-alloc + cross-metric blend bugs.
 func TestGatherHotspots(t *testing.T) {
 	defer setModulePath("github.com/grafana/tempo")()
 	dir := t.TempDir()
@@ -157,10 +143,10 @@ func TestGatherHotspots(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "profiles"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "profiles", "svc.cpu.leaderboard.json"),
-		`[{"function":"github.com/grafana/tempo/pkg/a.F","value":100},{"function":"runtime.x","value":50}]`)
-	writeFile(t, filepath.Join(dir, "profiles", "svc.inuse.leaderboard.json"),
-		`[{"function":"github.com/grafana/tempo/pkg/a.F","value":10}]`)
+	writePprof(t, filepath.Join(dir, "profiles", "svc.cpu.pb.gz"), "cpu", "nanoseconds",
+		map[string]int64{"github.com/grafana/tempo/pkg/a.F": 100, "runtime.x": 50})
+	writePprof(t, filepath.Join(dir, "profiles", "svc.inuse.pb.gz"), "inuse_space", "bytes",
+		map[string]int64{"github.com/grafana/tempo/pkg/a.F": 10})
 
 	hots, err := gatherHotspots("", 20)
 	if err != nil {
