@@ -14,6 +14,9 @@ Data comes from the Grafana stack via the [`gcx`](https://github.com/grafana/gcx
 [Pyroscope](https://github.com/grafana/pyroscope) profiles explain it at the code level. With no
 `gcx`, it falls back to a local [`go pprof`](https://pkg.go.dev/runtime/pprof) profile.
 
+> [!NOTE]
+> Alpha-stage software, provided as-is with no warranty. Use at your own risk. A personal project, not affiliated with, or endorsed by, my employer.
+
 ## How it works
 
 The skill orchestrates; four agents reason; the Go binary does the deterministic work. They
