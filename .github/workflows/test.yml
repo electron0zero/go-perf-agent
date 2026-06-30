@@ -21,6 +21,7 @@ jobs:
           go install golang.org/x/tools/cmd/goimports@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: make lint
+      - run: make vendor-check
 
   test:
     runs-on: ubuntu-latest
