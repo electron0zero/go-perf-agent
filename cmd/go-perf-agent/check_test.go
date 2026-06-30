@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestGoMinor(t *testing.T) {
 	cases := map[string]int{
@@ -11,8 +15,6 @@ func TestGoMinor(t *testing.T) {
 		"go version devel":                 0,
 	}
 	for in, want := range cases {
-		if got := goMinor(in); got != want {
-			t.Errorf("goMinor(%q) = %d, want %d", in, got, want)
-		}
+		require.Equal(t, want, goMinor(in), "goMinor(%q)", in)
 	}
 }

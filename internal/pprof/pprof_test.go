@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/pprof/profile"
+	"github.com/stretchr/testify/require"
 )
 
 // writeProf writes a single-sample-type pprof to path: one {function: flat-value} pair per entry.
@@ -22,13 +23,9 @@ func writeProf(t *testing.T, path, sampleType, unit string, flat map[string]int6
 		p.Sample = append(p.Sample, &profile.Sample{Location: []*profile.Location{loc}, Value: []int64{v}})
 	}
 	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer f.Close()
-	if err := p.Write(f); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, p.Write(f))
 }
 
 func TestParseFlat(t *testing.T) {
@@ -37,33 +34,26 @@ func TestParseFlat(t *testing.T) {
 	writeProf(t, cpu, "cpu", "nanoseconds", map[string]int64{"a.Foo": 100, "a.Bar": 30, "a.Baz": 10})
 
 	all, err := ParseFlat(cpu, 0, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 3 {
-		t.Fatalf("got %d weights, want 3: %+v", len(all), all)
-	}
+	require.NoError(t, err)
+	require.Len(t, all, 3)
 	for _, w := range all {
-		if w.Metric != "cpu" {
-			t.Errorf("%s metric = %q, want cpu", w.Func, w.Metric)
-		}
+		require.Equal(t, "cpu", w.Metric, w.Func)
 	}
 
 	// topn caps per metric, keeping the heaviest first
 	top2, _ := ParseFlat(cpu, 2, false)
-	if len(top2) != 2 || top2[0].Func != "a.Foo" || top2[0].Value != 100 {
-		t.Errorf("top2 = %+v, want Foo(100) first then Bar(30)", top2)
-	}
+	require.Len(t, top2, 2)
+	require.Equal(t, "a.Foo", top2[0].Func, "heaviest first")
+	require.Equal(t, 100.0, top2[0].Value)
 
 	// dropInuse skips inuse_space (meaningless from a local benchmark); kept otherwise
 	inuse := filepath.Join(dir, "x.inuse.pb.gz")
 	writeProf(t, inuse, "inuse_space", "bytes", map[string]int64{"a.F": 100})
-	if got, _ := ParseFlat(inuse, 0, true); len(got) != 0 {
-		t.Errorf("dropInuse should skip inuse, got %+v", got)
-	}
-	if got, _ := ParseFlat(inuse, 0, false); len(got) != 1 || got[0].Metric != "inuse" {
-		t.Errorf("inuse should be kept when not dropped, got %+v", got)
-	}
+	got, _ := ParseFlat(inuse, 0, true)
+	require.Empty(t, got, "dropInuse should skip inuse")
+	got, _ = ParseFlat(inuse, 0, false)
+	require.Len(t, got, 1, "inuse kept when not dropped")
+	require.Equal(t, "inuse", got[0].Metric)
 }
 
 func TestVersion(t *testing.T) {
@@ -80,18 +70,10 @@ func TestVersion(t *testing.T) {
 	}
 	path := filepath.Join(dir, "v.pb.gz")
 	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Write(f); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, p.Write(f))
 	f.Close()
 
-	if got := Version(path); got != "abc123" {
-		t.Errorf("Version = %q, want abc123 (mapping build id)", got)
-	}
-	if got := Version(filepath.Join(dir, "missing.pb.gz")); got != "" {
-		t.Errorf("Version(missing) = %q, want empty", got)
-	}
+	require.Equal(t, "abc123", Version(path), "mapping build id")
+	require.Empty(t, Version(filepath.Join(dir, "missing.pb.gz")), "missing file")
 }

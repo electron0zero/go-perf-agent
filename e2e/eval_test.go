@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGrade(t *testing.T) {
@@ -19,17 +21,11 @@ func TestGrade(t *testing.T) {
 		{"single match", "clean", []string{"clean"}, "PASS"},
 	}
 	for _, c := range cases {
-		if got := grade(c.expected, c.got); got != c.want {
-			t.Errorf("%s: grade(%q, %v) = %q, want %q", c.name, c.expected, c.got, got, c.want)
-		}
+		require.Equal(t, c.want, grade(c.expected, c.got), c.name)
 	}
 }
 
 func TestHypothesisID(t *testing.T) {
-	if got := hypothesisID(json.RawMessage(`{"id":"h7","pattern":"x"}`)); got != "h7" {
-		t.Errorf("hypothesisID = %q, want h7", got)
-	}
-	if got := hypothesisID(json.RawMessage(`{"pattern":"x"}`)); got != "h" {
-		t.Errorf("hypothesisID with no id = %q, want fallback h", got)
-	}
+	require.Equal(t, "h7", hypothesisID(json.RawMessage(`{"id":"h7","pattern":"x"}`)))
+	require.Equal(t, "h", hypothesisID(json.RawMessage(`{"pattern":"x"}`)), "no id falls back to h")
 }

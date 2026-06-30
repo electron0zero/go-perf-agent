@@ -2,8 +2,9 @@ package model
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestStoreRoundtrip(t *testing.T) {
@@ -12,57 +13,43 @@ func TestStoreRoundtrip(t *testing.T) {
 		{ID: "h1", Pattern: "string-builder", Symbol: "pkg.Foo", Metric: "B_op"},
 		{ID: "h2", Pattern: "preallocate", Symbol: "pkg.Bar", Metric: "allocs_op"},
 	}
-	if err := WriteJSON(filepath.Join(dir, "hypotheses.json"), hs); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, WriteJSON(filepath.Join(dir, "hypotheses.json"), hs))
+
 	got, err := LoadHypotheses(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].ID != "h1" || got[1].Metric != "allocs_op" {
-		t.Fatalf("LoadHypotheses = %+v", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, "h1", got[0].ID)
+	require.Equal(t, "allocs_op", got[1].Metric)
 
 	h, err := GetHypothesis(dir, "h2")
-	if err != nil || h.Symbol != "pkg.Bar" {
-		t.Fatalf("GetHypothesis(h2) = %+v, %v", h, err)
-	}
-	if _, err := GetHypothesis(dir, "nope"); err == nil {
-		t.Error("GetHypothesis(missing) should error")
-	}
-	if _, err := LoadHypotheses(t.TempDir()); err == nil {
-		t.Error("LoadHypotheses with no file should error")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "pkg.Bar", h.Symbol)
+
+	_, err = GetHypothesis(dir, "nope")
+	require.Error(t, err, "missing hypothesis should error")
+	_, err = LoadHypotheses(t.TempDir())
+	require.Error(t, err, "no file should error")
 }
 
 func TestApplyCritic(t *testing.T) {
-	// reject on a PROVED downgrades to need_more_data and rewrites the gate reason
+	// reject on a PROVED downgrades to need_more_data and folds the gate reason in
 	v := Verdict{ID: "h1", Status: "proved", Verdict: &VerdictDetail{Reason: "significant improvement"}}
-	if !v.ApplyCritic(true, "behavior changed") {
-		t.Fatal("reject on proved should downgrade")
-	}
-	if v.Status != "need_more_data" {
-		t.Errorf("status = %q, want need_more_data", v.Status)
-	}
-	if v.Critic == nil || v.Critic.Passed {
-		t.Errorf("critic = %+v, want recorded + not passed", v.Critic)
-	}
-	if !strings.Contains(v.Verdict.Reason, "downgraded by critic") || !strings.Contains(v.Verdict.Reason, "significant improvement") {
-		t.Errorf("reason should fold in critic + gate reason, got %q", v.Verdict.Reason)
-	}
+	require.True(t, v.ApplyCritic(true, "behavior changed"), "reject on proved downgrades")
+	require.Equal(t, "need_more_data", v.Status)
+	require.NotNil(t, v.Critic)
+	require.False(t, v.Critic.Passed)
+	require.Contains(t, v.Verdict.Reason, "downgraded by critic")
+	require.Contains(t, v.Verdict.Reason, "significant improvement")
 
 	// reject on a non-proved verdict only notes it; never changes status
 	r := Verdict{ID: "h2", Status: "rejected"}
-	if r.ApplyCritic(true, "still bad") {
-		t.Error("reject on rejected should not downgrade")
-	}
-	if r.Status != "rejected" {
-		t.Errorf("status = %q, want rejected (never promoted)", r.Status)
-	}
+	require.False(t, r.ApplyCritic(true, "still bad"), "reject on rejected does not downgrade")
+	require.Equal(t, "rejected", r.Status, "critic never promotes")
 
 	// pass records a passing review, no status change
 	p := Verdict{ID: "h3", Status: "proved", Verdict: &VerdictDetail{Reason: "win"}}
-	if p.ApplyCritic(false, "") || p.Status != "proved" || p.Critic == nil || !p.Critic.Passed {
-		t.Errorf("pass should record passed critic and keep proved, got %+v", p)
-	}
+	require.False(t, p.ApplyCritic(false, ""))
+	require.Equal(t, "proved", p.Status)
+	require.NotNil(t, p.Critic)
+	require.True(t, p.Critic.Passed)
 }

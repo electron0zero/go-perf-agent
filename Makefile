@@ -7,8 +7,9 @@ BINARY := go-perf-agent
 # ./e2e is the exact harness package (never ./e2e/... - that would pull in the fixture scenarios).
 PKGS := ./cmd/... ./internal/... ./e2e
 SRC := cmd internal e2e/*.go
+COVERAGE := coverage.out
 
-.PHONY: all build fmt lint test e2e ci clean vendor vendor-check
+.PHONY: all build fmt lint test cover e2e ci clean vendor vendor-check
 
 all: build
 
@@ -25,6 +26,13 @@ lint:
 
 test:
 	go test $(PKGS)
+
+# coverage summary: per-package % (from go test), then the uncovered funcs (0.0%) and the total.
+cover:
+	@go test -coverprofile=$(COVERAGE) $(PKGS)
+	@echo "--- uncovered functions (0.0%) ---"
+	@go tool cover -func=$(COVERAGE) | awk '$$3 == "0.0%"'
+	@go tool cover -func=$(COVERAGE) | tail -1
 
 e2e:
 	go run ./e2e eval
@@ -48,4 +56,4 @@ vendor-check:
 ci: lint vendor-check test e2e
 
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) $(COVERAGE)

@@ -3,17 +3,16 @@ package diff
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const tempoMod = "github.com/grafana/tempo"
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 }
 
 func TestParseUnifiedRanges(t *testing.T) {
@@ -33,14 +32,11 @@ diff --git a/y.go b/y.go
 -old
 +new
 `
-	got := parseUnifiedRanges(diff)
 	want := map[string][][2]int{
 		"x.go": {{10, 12}, {25, 26}},
 		"y.go": {{1, 1}}, // no count => 1 line
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseUnifiedRanges =\n%v\nwant\n%v", got, want)
-	}
+	require.Equal(t, want, parseUnifiedRanges(diff))
 }
 
 func TestFuncsFromPatchHeaders(t *testing.T) {
@@ -54,15 +50,11 @@ func TestFuncsFromPatchHeaders(t *testing.T) {
 +z
 `
 	got := funcsFromPatchHeaders(patch, tempoMod)
-	if len(got) != 2 {
-		t.Fatalf("got %d funcs, want 2 (test file skipped): %+v", len(got), got)
-	}
-	if got[0].Func != "(*Options).Compile" || got[0].Symbol != "github.com/grafana/tempo/pkg/a.(*Options).Compile" {
-		t.Errorf("func0 = %+v", got[0])
-	}
-	if got[1].Func != "Top" || got[1].Symbol != "github.com/grafana/tempo/pkg/a.Top" {
-		t.Errorf("func1 = %+v", got[1])
-	}
+	require.Len(t, got, 2, "test file skipped") // x_test.go dropped
+	require.Equal(t, "(*Options).Compile", got[0].Func)
+	require.Equal(t, "github.com/grafana/tempo/pkg/a.(*Options).Compile", got[0].Symbol)
+	require.Equal(t, "Top", got[1].Func)
+	require.Equal(t, "github.com/grafana/tempo/pkg/a.Top", got[1].Symbol)
 }
 
 func TestFuncsForRanges(t *testing.T) {
@@ -70,15 +62,16 @@ func TestFuncsForRanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "x.go")
 	writeFile(t, path, src)
 
-	if got := funcsForRanges(path, [][2]int{{4, 4}}, tempoMod); len(got) != 1 || got[0].Func != "Foo" || got[0].Lines != "3-5" {
-		t.Errorf("range in Foo gave %+v", got)
-	}
-	if got := funcsForRanges(path, [][2]int{{8, 8}}, tempoMod); len(got) != 1 || got[0].Func != "(*Bar).Baz" {
-		t.Errorf("range in Baz gave %+v", got)
-	}
-	if got := funcsForRanges(path, [][2]int{{1, 1}}, tempoMod); len(got) != 0 {
-		t.Errorf("range in package decl should match no func, got %+v", got)
-	}
+	foo := funcsForRanges(path, [][2]int{{4, 4}}, tempoMod)
+	require.Len(t, foo, 1)
+	require.Equal(t, "Foo", foo[0].Func)
+	require.Equal(t, "3-5", foo[0].Lines)
+
+	baz := funcsForRanges(path, [][2]int{{8, 8}}, tempoMod)
+	require.Len(t, baz, 1)
+	require.Equal(t, "(*Bar).Baz", baz[0].Func)
+
+	require.Empty(t, funcsForRanges(path, [][2]int{{1, 1}}, tempoMod), "package decl matches no func")
 }
 
 func TestSymbolFor(t *testing.T) {
@@ -89,24 +82,18 @@ func TestSymbolFor(t *testing.T) {
 		{".", "", "Root", "github.com/grafana/tempo.Root"},
 	}
 	for _, c := range cases {
-		if got := symbolFor(c.pkgDir, c.recv, c.name, tempoMod); got != c.want {
-			t.Errorf("symbolFor(%q,%q,%q) = %q, want %q", c.pkgDir, c.recv, c.name, got, c.want)
-		}
+		require.Equal(t, c.want, symbolFor(c.pkgDir, c.recv, c.name, tempoMod), "symbolFor(%q,%q,%q)", c.pkgDir, c.recv, c.name)
 	}
 }
 
 func TestSymbolForNoModule(t *testing.T) {
-	if got := symbolFor("pkg/a", "*T", "M", ""); got != "" {
-		t.Errorf("empty modulePath should give empty symbol, got %q", got)
-	}
+	require.Empty(t, symbolFor("pkg/a", "*T", "M", ""), "empty modulePath => empty symbol")
 }
 
 func TestReceiverFromText(t *testing.T) {
 	cases := map[string]string{"o *T": "*T", "o T": "T", "": "", "o T[U]": "T", "*T": "*T"}
 	for in, want := range cases {
-		if got := receiverFromText(in); got != want {
-			t.Errorf("receiverFromText(%q) = %q, want %q", in, got, want)
-		}
+		require.Equal(t, want, receiverFromText(in), "receiverFromText(%q)", in)
 	}
 }
 
@@ -114,19 +101,63 @@ func TestSkipGoFile(t *testing.T) {
 	skip := []string{"x_test.go", "vendor/a/b.go", "a/vendor/b.go", "x.pb.go", "x.gen.go", "x_gen.go", "README.md"}
 	keep := []string{"x.go", "pkg/a/foo.go"}
 	for _, f := range skip {
-		if !skipGoFile(f) {
-			t.Errorf("skipGoFile(%q) = false, want true", f)
-		}
+		require.True(t, skipGoFile(f), "skipGoFile(%q) should skip", f)
 	}
 	for _, f := range keep {
-		if skipGoFile(f) {
-			t.Errorf("skipGoFile(%q) = true, want false", f)
-		}
+		require.False(t, skipGoFile(f), "skipGoFile(%q) should keep", f)
 	}
 }
 
 func TestOrFallback(t *testing.T) {
-	if orFallback("", "def") != "def" || orFallback("x", "def") != "x" {
-		t.Error("orFallback wrong")
+	require.Equal(t, "def", orFallback("", "def"))
+	require.Equal(t, "x", orFallback("x", "def"))
+}
+
+func TestToHotspots(t *testing.T) {
+	meta := Meta{Funcs: []ChangedFunc{
+		{Symbol: "m/pkg/a.Foo", Package: "pkg/a", Func: "Foo"},
+		{Symbol: "m/pkg/b.Bar", Package: "pkg/b", Func: "Bar"},
+		{Symbol: "", Package: "pkg/c", Func: "Baz"}, // no symbol -> fallback pkg.Func
+	}}
+	weights := map[string]float64{"m/pkg/a.Foo": 5, "m/pkg/b.Bar": 40}
+
+	hots := ToHotspots(meta, weights)
+	require.Len(t, hots, 3)
+	// ranked by weight desc: Bar(40), Foo(5), Baz(0); ranks 1..3
+	require.Equal(t, "m/pkg/b.Bar", hots[0].Symbol)
+	require.Equal(t, 40.0, hots[0].WeightPct)
+	require.Equal(t, 1, hots[0].Rank)
+	require.Equal(t, "m/pkg/a.Foo", hots[1].Symbol)
+	require.Equal(t, 2, hots[1].Rank)
+	require.Equal(t, "pkg/c.Baz", hots[2].Symbol, "missing symbol falls back to pkg.Func")
+	require.Equal(t, 3, hots[2].Rank)
+	// every changed func is a candidate, tagged diff/diff
+	for _, h := range hots {
+		require.True(t, h.Candidate && h.Editable && h.InScope)
+		require.Equal(t, "diff", h.Metric)
+		require.Equal(t, "diff", h.Source)
 	}
+}
+
+func TestPackages(t *testing.T) {
+	meta := Meta{Funcs: []ChangedFunc{
+		{Package: "pkg/b"}, {Package: "pkg/a"}, {Package: "pkg/b"}, {Package: "pkg/a/sub"},
+	}}
+	require.Equal(t, []string{"pkg/a", "pkg/a/sub", "pkg/b"}, Packages(meta), "unique + sorted")
+	require.Empty(t, Packages(Meta{}))
+}
+
+func TestSortFuncs(t *testing.T) {
+	fs := []ChangedFunc{
+		{Package: "pkg/b", Func: "Z"},
+		{Package: "pkg/a", Func: "B"},
+		{Package: "pkg/a", Func: "A"},
+	}
+	sortFuncs(fs)
+	// sorted by package, then func name
+	require.Equal(t, []ChangedFunc{
+		{Package: "pkg/a", Func: "A"},
+		{Package: "pkg/a", Func: "B"},
+		{Package: "pkg/b", Func: "Z"},
+	}, fs)
 }

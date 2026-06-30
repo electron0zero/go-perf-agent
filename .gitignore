@@ -4,10 +4,11 @@
 # the built binary (this module is named go-perf-agent)
 /go-perf-agent
 
-# go build / profiling artifacts
+# go build / profiling / coverage artifacts
 *.test
 *.prof
 *.pb.gz
+coverage.out
 
 # editor / OS
 .idea/
