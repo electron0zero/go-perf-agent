@@ -8,9 +8,53 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/pprof/profile"
 )
+
+// gcxRun runs a gcx subcommand, retrying transient failures (gcx calls fail intermittently), and
+// on failure returns an error that includes gcx's own output so the cause is diagnosable instead
+// of a bare "exit status 1".
+func gcxRun(args ...string) (string, error) {
+	var stdout, stderr string
+	var err error
+	attempts := 0
+	for attempt := 1; attempt <= 3; attempt++ {
+		attempts = attempt
+		stdout, stderr, err = run("", "gcx", args...)
+		if err == nil {
+			return stdout, nil
+		}
+		// don't retry clearly-permanent failures (size cap, auth, unimplemented) - retrying wastes
+		// time and won't change the outcome.
+		if permanentGcxError(stdout + stderr) {
+			break
+		}
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		detail = strings.TrimSpace(stdout)
+	}
+	if strings.Contains(detail, "50 MB") || strings.Contains(detail, "exceeds") {
+		detail += "\n(narrow the window: smaller --window, or a tighter --from/--to)"
+	}
+	sub := strings.Join(args[:min(3, len(args))], " ")
+	return stdout, fmt.Errorf("gcx %s failed after %d attempt(s): %v: %s", sub, attempts, err, detail)
+}
+
+// permanentGcxError reports whether gcx output indicates a failure that a retry cannot fix.
+func permanentGcxError(out string) bool {
+	for _, s := range []string{"exceeds", "50 MB", "unauthorized", "not yet implemented", "invalid"} {
+		if strings.Contains(out, s) {
+			return true
+		}
+	}
+	return false
+}
 
 // collect-traces: the FIRST step for production telemetry. It only COLLECTS and DUMPS - it runs
 // the TraceQL search and writes the search result plus the full JSON of the slowest traces to
@@ -66,10 +110,9 @@ func (c *collectTracesCmd) Run() error {
 	info("tempo query -> %s", search)
 	info("  TraceQL: %s", q)
 
-	stdout, stderr, err := run("", "gcx", gcxArgs...)
+	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
-		fmt.Fprint(os.Stderr, stderr)
-		return fmt.Errorf("tempo query failed: %w (run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
+		return fmt.Errorf("collect-traces: %w\n(run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
 	}
 	if err := os.WriteFile(search, []byte(stdout), 0o644); err != nil {
 		return err
@@ -117,9 +160,8 @@ func dumpSlowTraces(searchJSON string, dump int, uid string, tflags []string) in
 		if uid != "" {
 			args = append(args, "-d", uid)
 		}
-		out, stderr, err := run("", "gcx", args...)
+		out, err := gcxRun(args...)
 		if err != nil {
-			fmt.Fprint(os.Stderr, stderr)
 			info("  could not fetch trace %s: %v (skipping)", t.TraceID, err)
 			continue
 		}
@@ -173,10 +215,9 @@ func (c *collectExemplarsCmd) Run() error {
 
 	out := filepath.Join(gpaDir, "profiles", safeServiceName(c.Service)+".exemplars."+c.Kind+".json")
 	info("pyroscope %s exemplars -> %s", c.Kind, out)
-	stdout, stderr, err := run("", "gcx", gcxArgs...)
+	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
-		fmt.Fprint(os.Stderr, stderr)
-		return fmt.Errorf("pyroscope exemplars failed: %w (needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
+		return fmt.Errorf("collect-exemplars: %w\n(needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
 	}
 	if err := os.WriteFile(out, []byte(stdout), 0o644); err != nil {
 		return err
@@ -265,10 +306,9 @@ func (c *collectProfilesCmd) Run() error {
 		for _, id := range c.ProfileIDs {
 			gcxArgs = append(gcxArgs, "--profile-id", id)
 		}
-		_, stderr, err := run("", "gcx", gcxArgs...)
+		_, err := gcxRun(gcxArgs...)
 		if err != nil {
 			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
-			fmt.Fprint(os.Stderr, stderr)
 			info("  %s query failed, skipping: %v", k.kind, err)
 			continue
 		}
@@ -319,7 +359,7 @@ func profileVersion(path string) string {
 // function) the user wants to target, then run hotspots on the resulting profiles. Local is the
 // only profiles-first path; production starts from traces.
 type collectLocalCmd struct {
-	Pkg       string `default:"." help:"single package to benchmark (e.g. ./pkg/parquet) - not ./..."`
+	Pkg       string `default:"." help:"single package to benchmark (e.g. ./internal/store) - not ./..."`
 	Bench     string `default:"." help:"benchmark name regex to profile (e.g. BenchmarkDecode)"`
 	Benchtime string `default:"1s" help:"go test -benchtime"`
 	Count     int    `default:"1" help:"go test -count"`
