@@ -43,6 +43,7 @@ var cli struct {
 	CollectExemplars collectExemplarsCmd `cmd:"" help:"Pivot from a hot service to its profile UUIDs/spans via gcx [production telemetry, needs auth]"`
 	CollectProfiles  collectProfilesCmd  `cmd:"" help:"Pull cpu/alloc/inuse pprof for the hot service via gcx [production telemetry, needs auth]"`
 	CollectLocal     collectLocalCmd     `cmd:"" help:"Profile a benchmark with go pprof [no production telemetry, local data]"`
+	TraceSummary     traceSummaryCmd     `cmd:"" help:"Extract request shape + span fan-out from a dumped trace (for the agent to interpret)"`
 	Hotspots         hotspotsCmd         `cmd:"" help:"Rank hot symbols and map to packages -> hotspots.json"`
 	TargetDiff       targetDiffCmd       `cmd:"" help:"Target a PR / local diff: changed funcs become the candidate set"`
 	BenchBaseline    benchBaselineCmd    `cmd:"" help:"Create worktree + compile the pristine baseline binary"`
