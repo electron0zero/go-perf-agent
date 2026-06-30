@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"go-perf-agent/internal/sys"
+	"go-perf-agent/internal/helper"
 )
 
 // evalCmd runs each scenario Runs times against a freshly built engine and grades its verdicts, so
@@ -106,7 +106,7 @@ func runScenario(self, dir string, spec expectedSpec, benchCount int, gpaDir str
 	}
 
 	if spec.Type == "regression" {
-		base, _, _ := sys.Run(tmp, "git", "rev-parse", "HEAD")
+		base, _, _ := helper.Run(tmp, "git", "rev-parse", "HEAD")
 		base = strings.TrimSpace(base)
 		if err := copyDir(filepath.Join(dir, "candidate"), tmp); err != nil {
 			return "", err
@@ -140,7 +140,7 @@ func runScenario(self, dir string, spec expectedSpec, benchCount int, gpaDir str
 	}
 	// apply the candidate change INTO THE WORKTREE (where bench-verdict judges), exactly like the
 	// validation agent edits .go-perf-agent/wt/<id>/ - not the repo root.
-	if sys.Exists(filepath.Join(dir, "candidate")) {
+	if helper.Exists(filepath.Join(dir, "candidate")) {
 		if err := copyDir(filepath.Join(dir, "candidate"), filepath.Join(tmp, gpaDir, "wt", id)); err != nil {
 			return "", err
 		}
@@ -196,17 +196,17 @@ func reportEval(results []scenarioResult) error {
 }
 
 func gitInitCommit(dir, msg string) error {
-	if !sys.Exists(filepath.Join(dir, ".git")) {
-		if _, s, err := sys.Run(dir, "git", "init", "-q"); err != nil {
+	if !helper.Exists(filepath.Join(dir, ".git")) {
+		if _, s, err := helper.Run(dir, "git", "init", "-q"); err != nil {
 			return fmt.Errorf("git init: %s", s)
 		}
-		_, _, _ = sys.Run(dir, "git", "config", "user.email", "eval@local")
-		_, _, _ = sys.Run(dir, "git", "config", "user.name", "eval")
+		_, _, _ = helper.Run(dir, "git", "config", "user.email", "eval@local")
+		_, _, _ = helper.Run(dir, "git", "config", "user.name", "eval")
 	}
-	if _, s, err := sys.Run(dir, "git", "add", "-A"); err != nil {
+	if _, s, err := helper.Run(dir, "git", "add", "-A"); err != nil {
 		return fmt.Errorf("git add: %s", s)
 	}
-	if _, s, err := sys.Run(dir, "git", "commit", "-q", "-m", msg); err != nil {
+	if _, s, err := helper.Run(dir, "git", "commit", "-q", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %s", s)
 	}
 	return nil

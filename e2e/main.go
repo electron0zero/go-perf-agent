@@ -13,7 +13,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"go-perf-agent/internal/sys"
+	"go-perf-agent/internal/helper"
 )
 
 var cli struct {
@@ -35,7 +35,7 @@ func buildEngine() (bin, tmp string, err error) {
 		return "", "", err
 	}
 	bin = filepath.Join(tmp, "go-perf-agent")
-	if _, stderr, berr := sys.Run("", "go", "build", "-o", bin, "./cmd/go-perf-agent"); berr != nil {
+	if _, stderr, berr := helper.Run("", "go", "build", "-o", bin, "./cmd/go-perf-agent"); berr != nil {
 		os.RemoveAll(tmp)
 		return "", "", fmt.Errorf("build go-perf-agent: %s", stderr)
 	}

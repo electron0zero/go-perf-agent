@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"go-perf-agent/internal/sys"
+	"go-perf-agent/internal/helper"
 )
 
 // gcxRun executes `gcx <args>`, retrying transient failures and surfacing gcx's real output on error
@@ -16,7 +16,7 @@ func gcxRun(args ...string) (string, error) {
 	attempts := 0
 	for attempt := 1; attempt <= 3; attempt++ {
 		attempts = attempt
-		stdout, stderr, err = sys.Run("", "gcx", args...)
+		stdout, stderr, err = helper.Run("", "gcx", args...)
 		if err == nil {
 			return stdout, nil
 		}

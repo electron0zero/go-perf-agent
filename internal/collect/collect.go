@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"go-perf-agent/internal/helper"
 	"go-perf-agent/internal/pprof"
-	"go-perf-agent/internal/sys"
 )
 
 // SafeServiceName flattens a gcx service_name (which may contain "/") so outputs stay flat in
@@ -95,7 +95,7 @@ type TracesOpts struct {
 // Traces runs the TraceQL search, writes the search result, and dumps the slowest full traces for
 // the agent to analyze. It only collects; analysis is a separate step.
 func Traces(o TracesOpts, logf func(string, ...any)) error {
-	logf = orNoop(logf)
+	logf = helper.OrNoop(logf)
 	q := BuildTraceQL(o.Service, o.Namespace, o.Query, o.MinDuration)
 	tflags := TimeArgs(o.Window, o.From, o.To)
 	gcxArgs := append([]string{"datasources", "tempo", "query", q}, tflags...)
@@ -173,7 +173,7 @@ type ExemplarsOpts struct {
 
 // CollectExemplars queries span/profile exemplars (the trace->profile pivot) and summarizes them.
 func CollectExemplars(o ExemplarsOpts, logf func(string, ...any)) error {
-	logf = orNoop(logf)
+	logf = helper.OrNoop(logf)
 	pt := o.ProfileType
 	if pt == "" {
 		pt = o.CPUPT
@@ -229,7 +229,7 @@ type ProfilesOpts struct {
 // Profiles pulls pyroscope profiles as real pprof (.pb.gz). It scopes to the slow work via --span-id
 // (a span's pyroscope.profile.id) or --profile-id (exemplar UUIDs), else the service-wide profile.
 func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
-	logf = orNoop(logf)
+	logf = helper.OrNoop(logf)
 	// cpu (time), alloc (churn), inuse (resident heap - the OOM signal). hotspots ranks each
 	// metric separately, so collecting all three keeps memory-residency a first-class signal.
 	types := []struct{ kind, pt string }{{"cpu", o.CPUPT}, {"alloc", o.AllocPT}, {"inuse", o.InusePT}}
@@ -250,7 +250,7 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 	collected := 0
 	var lastDest string
 	for _, k := range types {
-		dest := sys.MustAbs(filepath.Join(o.Dir, "profiles", fmt.Sprintf("%s.%s.pb.gz", SafeServiceName(o.Service), k.kind)))
+		dest := helper.MustAbs(filepath.Join(o.Dir, "profiles", fmt.Sprintf("%s.%s.pb.gz", SafeServiceName(o.Service), k.kind)))
 		logf("pyroscope %s profile -> %s", k.kind, dest)
 		gcxArgs := append([]string{"datasources", "pyroscope", "query", sel, "--profile-type", k.pt}, tflags...)
 		gcxArgs = append(gcxArgs, "-o", "pprof", "--pprof-path", dest, "--pprof-overwrite")
@@ -288,11 +288,11 @@ type LocalOpts struct {
 
 // Local profiles a benchmark in this repo with go's own pprof, writing local.cpu.prof + local.mem.prof.
 func Local(o LocalOpts, logf func(string, ...any)) error {
-	logf = orNoop(logf)
-	cpu := sys.MustAbs(filepath.Join(o.Dir, "profiles", "local.cpu.prof"))
-	mem := sys.MustAbs(filepath.Join(o.Dir, "profiles", "local.mem.prof"))
+	logf = helper.OrNoop(logf)
+	cpu := helper.MustAbs(filepath.Join(o.Dir, "profiles", "local.cpu.prof"))
+	mem := helper.MustAbs(filepath.Join(o.Dir, "profiles", "local.mem.prof"))
 	logf("profiling %s (bench=%s) -> local.cpu.prof + local.mem.prof", o.Pkg, o.Bench)
-	_, stderr, err := sys.Run("", "go", "test", "-run=^$", "-bench="+o.Bench, "-benchmem",
+	_, stderr, err := helper.Run("", "go", "test", "-run=^$", "-bench="+o.Bench, "-benchmem",
 		"-benchtime="+o.Benchtime, "-count="+strconv.Itoa(o.Count),
 		"-cpuprofile="+cpu, "-memprofile="+mem, o.Pkg)
 	if err != nil {
@@ -300,11 +300,4 @@ func Local(o LocalOpts, logf func(string, ...any)) error {
 	}
 	logf("next: go-perf-agent hotspots")
 	return nil
-}
-
-func orNoop(logf func(string, ...any)) func(string, ...any) {
-	if logf == nil {
-		return func(string, ...any) {}
-	}
-	return logf
 }

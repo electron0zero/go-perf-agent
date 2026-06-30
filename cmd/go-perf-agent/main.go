@@ -13,8 +13,6 @@ import (
 	"strings"
 
 	"github.com/alecthomas/kong"
-
-	"go-perf-agent/internal/sys"
 )
 
 // config (env-overridable)
@@ -111,9 +109,4 @@ func ensureDirs() {
 	for _, d := range []string{"profiles", "traces", "runs", "wt"} {
 		_ = os.MkdirAll(filepath.Join(gpaDir, d), 0o755)
 	}
-}
-
-// run is a cmd-local alias over the shared exec helper for `check`, which shells out directly.
-func run(dir, name string, args ...string) (string, string, error) {
-	return sys.Run(dir, name, args...)
 }

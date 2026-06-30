@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go-perf-agent/internal/helper"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ func (c *checkCmd) Run() error {
 			info("  ok       %-9s %s", t.name, t.why)
 		}
 	}
-	if out, _, err := run("", "go", "version"); err == nil {
+	if out, _, err := helper.Run("", "go", "version"); err == nil {
 		if v := goMinor(out); v > 0 && v < 23 {
 			info("  WARN     go is 1.%d; go-perf-agent needs Go 1.23+", v)
 			missing = true
@@ -68,7 +69,7 @@ func checkGcx() {
 		{[]string{"datasources", "pyroscope", "exemplars", "--help"}, "exemplars", "", "pyroscope exemplars (span/profile pivot)"},
 		{[]string{"datasources", "pyroscope", "query", "--help"}, "pprof", "", "pyroscope query -o pprof (profiles)"},
 	} {
-		out, errOut, _ := run("", "gcx", ck.args...)
+		out, errOut, _ := helper.Run("", "gcx", ck.args...)
 		s := out + errOut
 		bad := (ck.absent != "" && strings.Contains(s, ck.absent)) || (ck.want != "" && !strings.Contains(s, ck.want))
 		if bad {

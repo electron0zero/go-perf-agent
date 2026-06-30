@@ -1,7 +1,6 @@
-// Package sys holds the low-level system helpers shared across the engine: running external
-// commands (git/go/gcx/benchstat) and a couple of filesystem checks, so callers do not each
-// re-implement them.
-package sys
+// Package helper holds the small cross-cutting helpers shared across the engine - running external
+// commands, a couple of filesystem checks, and defaulting a nil progress logger.
+package helper
 
 import (
 	"os"
@@ -35,4 +34,13 @@ func MustAbs(p string) string {
 		return a
 	}
 	return p
+}
+
+// OrNoop returns logf, or a no-op logger when it is nil, so callers can accept an optional progress
+// logger without nil-checking at every use.
+func OrNoop(logf func(string, ...any)) func(string, ...any) {
+	if logf == nil {
+		return func(string, ...any) {}
+	}
+	return logf
 }
