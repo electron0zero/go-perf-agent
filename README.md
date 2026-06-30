@@ -48,14 +48,14 @@ is added to the session as an extra directory, so you do not copy anything into 
    ```bash
    claude --add-dir /path/to/target-repo # (or `/add-dir /path/to/target-repo` inside an existing session.)
    ```
-3. Run `go-perf-agent doctor` to check your tools (`go`, `git`, `benchstat`, a recent `gcx`) and see
+3. Run `go-perf-agent check` to check your tools (`go`, `git`, `benchstat`, a recent `gcx`) and see
    what is missing.
 4. Invoke the `go-perf-agent` skill and tell it what to audit (a service + window, a PR, or a local
    diff). It drives the whole loop and writes `.go-perf-agent/report.md` in the target repo.
 
 ## Prerequisites
 
-Tools on PATH (run `go-perf-agent doctor` to check):
+Tools on PATH (run `go-perf-agent check` to check):
 
 | tool | version | needed for                                                             |
 |---|---|------------------------------------------------------------------------|

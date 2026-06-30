@@ -49,12 +49,11 @@ the candidate set), `go-perf-agent bench-regression` (base-vs-head regression ch
 ## Step 0 - preflight
 
 ```bash
-go-perf-agent doctor          # check required tools + gcx capabilities; warn on gaps/old gcx
-go-perf-agent selftest        # offline: proves the pipeline runs without Grafana
+go-perf-agent check           # check required tools + gcx capabilities; warn on gaps/old gcx
 gcx auth login           # ONLY if collecting live telemetry and the session is expired
 ```
 
-If `doctor` warns that gcx lacks `tempo query` / `exemplars` / `-o pprof`, tell the user to upgrade
+If `check` warns that gcx lacks `tempo query` / `exemplars` / `-o pprof`, tell the user to upgrade
 gcx (v0.4.2+) before the production path. If the user has not picked a target service/window, ASK
 (AskUserQuestion). Do not guess. For an incident, ask for the firing window; given a single
 timestamp, query +-5 min around it (`--from/--to`), not "now".

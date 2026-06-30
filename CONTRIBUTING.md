@@ -5,9 +5,10 @@ discuss it first.
 
 Before opening a PR, run `make ci` (lint, tests, golden-scenario eval) and make sure it is green.
 
-The golden-scenario suite lives in `eval/` (`make eval`, or `go run ./eval`): it builds the engine
-and checks its verdicts against known-correct scenarios. Add or update a scenario when you change the
-gate, structural checks, or a verdict path - see `eval/README.md`.
+The end-to-end suite lives in `e2e/` (`make e2e`, or `go run ./e2e eval` / `go run ./e2e smoke`): it
+builds the engine and checks its verdicts against known-correct scenarios plus a collect->rank smoke.
+Add or update a scenario when you change the gate, structural checks, or a verdict path - see
+`e2e/README.md`.
 
 ## ownership for the changes
 

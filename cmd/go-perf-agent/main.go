@@ -34,8 +34,7 @@ var (
 // cli is the kong command tree. Each leaf is a *Cmd struct with a Run() error method (same
 // pattern as cmd/tempo-cli). kong derives kebab-case command names from the field names.
 var cli struct {
-	Doctor           doctorCmd           `cmd:"" help:"Preflight: check required tools + gcx capabilities/min version, warn on gaps"`
-	Selftest         selftestCmd         `cmd:"" help:"Offline pipeline check, benchmark -> hotspots [no production telemetry, local data]"`
+	Check            checkCmd            `cmd:"" help:"Preflight: check required tools + gcx capabilities/min version, warn on gaps"`
 	Scope            scopeCmd            `cmd:"" help:"Set in/out-of-scope code paths for the agents"`
 	CollectTraces    collectTracesCmd    `cmd:"" help:"TraceQL: find the slowest operations via gcx tempo [production telemetry, needs auth]"`
 	CollectExemplars collectExemplarsCmd `cmd:"" help:"Pivot from a hot service to its profile UUIDs/spans via gcx [production telemetry, needs auth]"`
@@ -56,7 +55,7 @@ var cli struct {
 func main() {
 	ctx := kong.Parse(&cli,
 		kong.Name("go-perf-agent"),
-		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, try 'go-perf-agent selftest' (offline), then for production telemetry go traces-first: collect-traces -> collect-exemplars -> collect-profiles -> hotspots. No gcx? use collect-local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=6) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
+		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, run 'go-perf-agent check' (preflight), then for production telemetry go traces-first: collect-traces -> collect-exemplars -> collect-profiles -> hotspots. No gcx? use collect-local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=6) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 	)

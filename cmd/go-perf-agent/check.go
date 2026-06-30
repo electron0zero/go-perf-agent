@@ -8,12 +8,12 @@ import (
 	"go-perf-agent/internal/probe"
 )
 
-// doctor checks the external tools go-perf-agent shells out to, and feature-detects the gcx
-// subcommands the production-telemetry path needs, so a run fails fast with a clear message
-// instead of an opaque "exit status 1" mid-collection.
-type doctorCmd struct{}
+// check verifies the external tools go-perf-agent shells out to, and feature-detects the gcx
+// subcommands the production-telemetry path needs, so a run fails fast with a clear message instead
+// of an opaque "exit status 1" mid-collection.
+type checkCmd struct{}
 
-func (c *doctorCmd) Run() error {
+func (c *checkCmd) Run() error {
 	info("checking tools go-perf-agent needs...")
 	missing := false
 

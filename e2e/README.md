@@ -1,17 +1,17 @@
-# eval
+# e2e
 
-Golden scenarios that check the go-perf-agent *engine* (not the code being optimized). Each
-scenario is a known situation with a known-correct verdict; the harness runs them and fails if the
-engine's verdict drifts. This is how we catch our own regressions when the gate, structural checks,
-or commands change.
-
-The harness is its own program here in `eval/` (not a shipped `go-perf-agent` subcommand - it is dev
-/ CI only). It self-builds the `go-perf-agent` binary and drives it against each scenario:
+End-to-end tests of the go-perf-agent *engine* (not the code being optimized), run as their own
+program here in `e2e/` (dev/CI only, not a shipped subcommand). Each self-builds the engine binary
+and drives it:
+- `eval` - golden scenarios with known-correct verdicts; fails if the engine's verdict drifts.
+- `smoke` - runs collect-local -> hotspots against a fixture; fails if the collect->rank front-end is
+  broken (the half `eval` does not cover).
 
 ```bash
-make eval                      # run every scenario 3x (self-builds the binary)
-go run ./eval --runs 5         # more runs = better flakiness detection
-go run ./eval --only noop      # one scenario
+make e2e                       # eval + smoke (self-builds the binary)
+go run ./e2e eval --runs 5     # more runs = better flakiness detection
+go run ./e2e eval --only noop  # one scenario
+go run ./e2e smoke             # front-end smoke only
 ```
 
 Each scenario runs multiple times on purpose: a check that only passes sometimes is luck, not

@@ -3,9 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,15 +12,62 @@ import (
 	"go-perf-agent/internal/sh"
 )
 
-// Opts configures an eval run. Self is the go-perf-agent binary invoked per scenario; GpaDir is the
-// working-dir name the engine writes under (.go-perf-agent) inside each throwaway repo.
-type Opts struct {
-	ScenariosDir string
-	Runs         int
-	Only         string
-	BenchCount   int
-	Self         string
-	GpaDir       string
+// evalCmd runs each scenario Runs times against a freshly built engine and grades its verdicts, so
+// we catch our own regressions when the gate / structural checks / commands change. Multiple runs
+// surface flakiness (a check that only passes sometimes is luck, not reliability).
+type evalCmd struct {
+	Dir        string `default:"e2e/scenarios" help:"scenarios directory"`
+	Runs       int    `default:"3" help:"runs per scenario (to catch flakiness)"`
+	Only       string `help:"only run scenarios whose name contains this"`
+	BenchCount int    `default:"10" help:"GPA_BENCH_COUNT for each scenario run"`
+	GpaDir     string `name:"gpa-dir" env:"GPA_DIR" default:".go-perf-agent" help:"engine working-dir name (matches the engine's GPA_DIR)"`
+}
+
+func (c *evalCmd) Run() error {
+	bin, tmp, err := buildEngine()
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+
+	entries, err := os.ReadDir(c.Dir)
+	if err != nil {
+		return fmt.Errorf("read scenarios %s: %w", c.Dir, err)
+	}
+
+	var results []scenarioResult
+	for _, e := range entries {
+		if !e.IsDir() || (c.Only != "" && !strings.Contains(e.Name(), c.Only)) {
+			continue
+		}
+		dir := filepath.Join(c.Dir, e.Name())
+		specRaw, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+		if err != nil {
+			continue // not a scenario
+		}
+		var spec expectedSpec
+		if err := json.Unmarshal(specRaw, &spec); err != nil {
+			results = append(results, scenarioResult{name: e.Name(), verdict: "ERROR", expected: "parse expected.json: " + err.Error()})
+			continue
+		}
+		res := scenarioResult{name: e.Name(), expected: spec.ExpectStatus}
+		var total time.Duration
+		for r := 0; r < c.Runs; r++ {
+			t0 := time.Now()
+			got, err := runScenario(bin, dir, spec, c.BenchCount, c.GpaDir)
+			total += time.Since(t0)
+			if err != nil {
+				got = "error:" + err.Error()
+			}
+			res.got = append(res.got, got)
+		}
+		res.avgMS = total.Milliseconds() / int64(max(c.Runs, 1))
+		res.verdict = grade(spec.ExpectStatus, res.got)
+		logf("%-22s expected=%-10s got=%v -> %s", res.name, res.expected, res.got, res.verdict)
+		results = append(results, res)
+	}
+
+	return reportEval(results)
 }
 
 type expectedSpec struct {
@@ -41,52 +86,6 @@ type scenarioResult struct {
 	got      []string // per run
 	verdict  string   // PASS | FAIL | FLAKY | ERROR
 	avgMS    int64
-}
-
-// Run executes each scenario Runs times, grades them, prints the result table to stdout, and
-// returns an error if any scenario failed or was flaky. logf takes per-scenario progress lines.
-func Run(o Opts, logf func(string, ...any)) error {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	entries, err := os.ReadDir(o.ScenariosDir)
-	if err != nil {
-		return fmt.Errorf("read scenarios %s: %w", o.ScenariosDir, err)
-	}
-
-	var results []scenarioResult
-	for _, e := range entries {
-		if !e.IsDir() || (o.Only != "" && !strings.Contains(e.Name(), o.Only)) {
-			continue
-		}
-		dir := filepath.Join(o.ScenariosDir, e.Name())
-		specRaw, err := os.ReadFile(filepath.Join(dir, "expected.json"))
-		if err != nil {
-			continue // not a scenario
-		}
-		var spec expectedSpec
-		if err := json.Unmarshal(specRaw, &spec); err != nil {
-			results = append(results, scenarioResult{name: e.Name(), verdict: "ERROR", expected: "parse expected.json: " + err.Error()})
-			continue
-		}
-		res := scenarioResult{name: e.Name(), expected: spec.ExpectStatus}
-		var total time.Duration
-		for r := 0; r < o.Runs; r++ {
-			t0 := time.Now()
-			got, err := runScenario(o.Self, dir, spec, o.BenchCount, o.GpaDir)
-			total += time.Since(t0)
-			if err != nil {
-				got = "error:" + err.Error()
-			}
-			res.got = append(res.got, got)
-		}
-		res.avgMS = total.Milliseconds() / int64(max(o.Runs, 1))
-		res.verdict = grade(spec.ExpectStatus, res.got)
-		logf("%-22s expected=%-10s got=%v -> %s", res.name, res.expected, res.got, res.verdict)
-		results = append(results, res)
-	}
-
-	return reportEval(results)
 }
 
 // runScenario sets up a throwaway repo from the scenario, runs the engine via the binary itself,
@@ -196,21 +195,6 @@ func reportEval(results []scenarioResult) error {
 	return nil
 }
 
-// ---- helpers ----------------------------------------------------------------------------
-
-// runSelf invokes the engine binary on a scenario repo. Its own exec (not sh.Run) is needed to
-// inject GPA_BENCH_COUNT and merge stdout+stderr for the scenario log.
-func runSelf(self, dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command(self, args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
-	var out strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
-	return out.String(), err
-}
-
 func gitInitCommit(dir, msg string) error {
 	if !exists(filepath.Join(dir, ".git")) {
 		if _, s, err := sh.Run(dir, "git", "init", "-q"); err != nil {
@@ -226,24 +210,6 @@ func gitInitCommit(dir, msg string) error {
 		return fmt.Errorf("git commit: %s", s)
 	}
 	return nil
-}
-
-func copyDir(src, dst string) error {
-	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(src, p)
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, b, 0o644)
-	})
 }
 
 func readStatus(path string) (string, error) {
@@ -269,9 +235,4 @@ func hypothesisID(raw json.RawMessage) string {
 		return "h"
 	}
 	return h.ID
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

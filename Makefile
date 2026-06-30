@@ -1,14 +1,14 @@
-# go-perf-agent. Thin CLI in cmd/go-perf-agent; engine logic and libraries in internal/; eval/ is the
-# dev regression harness (`go run ./eval`, self-builds the binary), not a shipped command.
-# eval/scenarios/* are fixtures (separate modules / overlays) exercised by `make eval`, never by `go test ./...`.
+# go-perf-agent. Thin CLI in cmd/go-perf-agent; engine logic and libraries in internal/; e2e/ is the
+# dev end-to-end harness (`go run ./e2e`, self-builds the binary), not a shipped command.
+# e2e/scenarios/* are fixtures (separate modules / overlays) exercised by `make e2e`, never by `go test ./...`.
 # Deps are vendored (vendor/), so builds are self-contained and offline-reproducible; with vendor/
 # present, go build/test/vet use -mod=vendor automatically.
 BINARY := go-perf-agent
-# ./eval is the exact harness package (never ./eval/... - that would pull in the fixture scenarios).
-PKGS := ./cmd/... ./internal/... ./eval
-SRC := cmd internal eval/*.go
+# ./e2e is the exact harness package (never ./e2e/... - that would pull in the fixture scenarios).
+PKGS := ./cmd/... ./internal/... ./e2e
+SRC := cmd internal e2e/*.go
 
-.PHONY: all build fmt lint test eval ci clean vendor vendor-check
+.PHONY: all build fmt lint test e2e ci clean vendor vendor-check
 
 all: build
 
@@ -26,8 +26,9 @@ lint:
 test:
 	go test $(PKGS)
 
-eval:
-	go run ./eval
+e2e:
+	go run ./e2e eval
+	go run ./e2e smoke
 
 # refresh vendored deps after changing go.mod
 vendor:
@@ -43,8 +44,8 @@ vendor-check:
 		git status --porcelain -- go.mod go.sum vendor/; exit 1; \
 	fi
 
-# what CI runs: format check + vet, vendor consistency, unit tests, then the golden-scenario gate.
-ci: lint vendor-check test eval
+# what CI runs: format check + vet, vendor consistency, unit tests, then the end-to-end gate.
+ci: lint vendor-check test e2e
 
 clean:
 	rm -f $(BINARY)
