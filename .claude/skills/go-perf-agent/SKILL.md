@@ -75,7 +75,7 @@ go-perf-agent collect-exemplars --service <svc> --window 1h --ds-uid <pyro-ds-ui
 go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>
 ```
 The `--span-id` pivot (traces-to-profiles, see
-https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles/) needs
+https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles.md) needs
 span profiling (otel-profiling-go) on the slow service, and by default only the local root span is
 tagged. When neither span-id nor exemplars resolve, drop the flags and pull the service-wide
 profile - the trace step still narrowed you to the slow service/operation. Datasource UIDs come

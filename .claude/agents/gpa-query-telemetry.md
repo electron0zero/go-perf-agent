@@ -34,6 +34,25 @@ and optionally a symptom (latency / alloc / cpu). Selectors follow OTel semantic
 Window: an incident has a time window, so prefer `--from/--to` over a relative `--window` (a single
 timestamp -> roughly +-5m around it). Keep it tight - wide profile windows can exceed gcx's 50 MB cap.
 
+TraceQL reference (full syntax: https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries.md):
+- Select spans with `{ ... }`. Attributes: `resource.<key>` (resource.service.name,
+  resource.service.namespace), `span.<key>` (span.http.route, span.http.status_code), and
+  intrinsics (`name`, `kind`, `status`, `duration`). Combine with `&&` / `||`; regex `=~` / `!~`
+  is fully anchored; structural ops `>>` descendant, `>` child, `<<` / `<` ancestor/parent.
+- Two query modes: `gcx datasources tempo query '<traceql>'` SEARCHES (returns traces);
+  `gcx datasources tempo metrics '<traceql> | count_over_time() by (<attr>)'` AGGREGATES. Use
+  metrics for "which service/operation is slow, how often" - `tempo query` ignores the `|` pipeline.
+- Filter operations by `span.http.route` or `name` (recent Tempo uses OTel `http.route` / `url.path`,
+  not `http.target`).
+Examples (slow-op hunting):
+```
+{ resource.service.namespace =~ "<ns-prefix>.*" && duration > 5s }                     # slow spans
+{ resource.service.name = "<svc>" && span.http.route =~ ".*query.*" && duration > 5s } # slow query ops
+{ <selector> && duration > 5s } | count_over_time() by (resource.service.namespace)    # slow count per service
+{ <selector> && duration > 5s } | count_over_time() by (span.http.route)               # which operation is slow
+{ resource.service.name = "<svc>" } >> { duration > 1s }                               # a slow descendant span
+```
+
 Step A - find the slow operation (traces):
 ```bash
 go-perf-agent collect-traces --service <svc> --namespace <ns> --from <ts-5m> --to <ts+5m> --ds-uid <tempo-uid> --min-duration 2s
@@ -61,9 +80,9 @@ Caveats (be honest): by default only the LOCAL ROOT span per service is tagged, 
 downstream service needs its OWN root span's `pyroscope.profile.id`, not the upstream caller's; and
 it only works where span profiling is enabled. If the chosen service has no `pyroscope.profile.id`
 / no samples for it, fall through to Step C. Mechanism + setup:
-- https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles/
-- https://grafana.com/docs/pyroscope/latest/configure-client/trace-span-profiles/
-- https://grafana.com/docs/pyroscope/latest/configure-client/trace-span-profiles/go-span-profiles/
+- https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles.md
+- https://grafana.com/docs/pyroscope/latest/configure-client/trace-span-profiles.md
+- https://grafana.com/docs/pyroscope/latest/configure-client/trace-span-profiles/go-span-profiles.md
 
 Step C - pivot via exemplars, else service-wide:
 ```bash

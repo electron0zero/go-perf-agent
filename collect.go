@@ -259,7 +259,7 @@ func summarizeExemplars(stdout string) {
 //	--span-id    the value of a slow span's `pyroscope.profile.id` attribute (= the span id).
 //	             otel-profiling-go tags profiles with the local root span's id under the `span_id`
 //	             label, so this fetches the EXACT profile for that span - the fastest trace->profile
-//	             pivot. See https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles/
+//	             pivot. See https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles.md
 //	--profile-id the profile UUIDs returned by `collect-exemplars`.
 type collectProfilesCmd struct {
 	Service     string   `required:"" help:"service_name to profile"`
