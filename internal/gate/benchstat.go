@@ -1,11 +1,9 @@
-// Package benchstat parses `benchstat -format csv` output into the per-metric verdict the
-// numeric gate decides on.
-package benchstat
+package gate
 
 import "strings"
 
-// ProofLabel maps a hypothesis proof metric (ns_op|B_op|allocs_op) to its benchstat column label.
-func ProofLabel(metric string) string {
+// proofLabel maps a hypothesis proof metric (ns_op|B_op|allocs_op) to its benchstat column label.
+func proofLabel(metric string) string {
 	switch metric {
 	case "ns_op":
 		return "sec/op"
@@ -17,11 +15,11 @@ func ProofLabel(metric string) string {
 	return ""
 }
 
-// Parse reads benchstat `-format csv` and returns ("vs base", p) for one metric.
+// parseBenchstat reads benchstat `-format csv` and returns ("vs base", p) for one metric.
 // A metric section starts with a header row `,<label>,CI,<label>,CI,vs base,P`; the next data
 // row (col 0 non-empty, not "geomean") carries vs base at col len-2 and "p=.. n=.." at col len-1.
 // vs base is "~" when not significant, else a signed percentage like "-19.04%".
-func Parse(csv, label string) (vsBase, p string) {
+func parseBenchstat(csv, label string) (vsBase, p string) {
 	inSection := false
 	for _, line := range strings.Split(csv, "\n") {
 		cols := strings.Split(line, ",")

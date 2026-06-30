@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"go-perf-agent/internal/hotspot"
-	"go-perf-agent/internal/sh"
+	"go-perf-agent/internal/sys"
 )
 
 // ChangedFunc is a function touched by a diff - the unit the loop targets in diff mode.
@@ -37,7 +37,7 @@ type Meta struct {
 // FromGit handles local modes: `git diff <spec>` gives changed files + new-file line ranges;
 // go/ast over the current files maps those ranges to enclosing functions.
 func FromGit(spec, source, modulePath string) (Meta, error) {
-	out, stderr, err := sh.Run("", "git", "diff", spec, "--unified=0", "--", "*.go")
+	out, stderr, err := sys.Run("", "git", "diff", spec, "--unified=0", "--", "*.go")
 	if err != nil {
 		return Meta{}, fmt.Errorf("git diff %s failed: %s", spec, stderr)
 	}
@@ -56,7 +56,7 @@ func FromGit(spec, source, modulePath string) (Meta, error) {
 // FromPR reads a PR patch via gh (non-invasive - no checkout). go/ast needs local head files which
 // we don't have, so changed funcs come from git's hunk-header function context.
 func FromPR(pr, modulePath string) (Meta, error) {
-	patch, stderr, err := sh.Run("", "gh", "pr", "diff", pr, "--patch")
+	patch, stderr, err := sys.Run("", "gh", "pr", "diff", pr, "--patch")
 	if err != nil {
 		return Meta{}, fmt.Errorf("gh pr diff %s failed: %s (is gh authenticated?)", pr, stderr)
 	}
@@ -64,7 +64,7 @@ func FromPR(pr, modulePath string) (Meta, error) {
 	meta.Funcs = funcsFromPatchHeaders(patch, modulePath)
 	sortFuncs(meta.Funcs)
 	// best-effort base/head refs
-	if v, _, e := sh.Run("", "gh", "pr", "view", pr, "--json", "baseRefName,headRefName", "-q", ".baseRefName+\"|\"+.headRefName"); e == nil {
+	if v, _, e := sys.Run("", "gh", "pr", "view", pr, "--json", "baseRefName,headRefName", "-q", ".baseRefName+\"|\"+.headRefName"); e == nil {
 		if parts := strings.SplitN(strings.TrimSpace(v), "|", 2); len(parts) == 2 {
 			meta.BaseRef, meta.HeadRef = parts[0], parts[1]
 		}

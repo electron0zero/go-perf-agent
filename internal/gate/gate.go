@@ -13,10 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	"go-perf-agent/internal/benchstat"
 	"go-perf-agent/internal/hotspot"
 	"go-perf-agent/internal/model"
-	"go-perf-agent/internal/sh"
+	"go-perf-agent/internal/sys"
 )
 
 // Opts configures a single-hypothesis run. Dir is the .go-perf-agent working dir.
@@ -41,7 +40,7 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 	runDir := filepath.Join(o.Dir, "runs", o.ID)
 	wt := filepath.Join(o.Dir, "wt", o.ID)
 	_ = os.MkdirAll(runDir, 0o755)
-	arun := mustAbs(runDir)
+	arun := sys.MustAbs(runDir)
 
 	// a dependency-change hypothesis only validates once the user opts its path into scope -
 	// otherwise the structural gate would reject the edit anyway. Signal it cleanly instead.
@@ -55,11 +54,11 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 		return "", nil
 	}
 
-	if exists(wt) {
+	if sys.Exists(wt) {
 		logf("worktree exists, reusing %s", wt)
 	} else {
 		logf("creating worktree %s off HEAD", wt)
-		if _, stderr, err := sh.Run("", "git", "worktree", "add", "-q", "--detach", wt, "HEAD"); err != nil {
+		if _, stderr, err := sys.Run("", "git", "worktree", "add", "-q", "--detach", wt, "HEAD"); err != nil {
 			return "", fmt.Errorf("git worktree add failed: %s", stderr)
 		}
 	}
@@ -76,7 +75,7 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 
 	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
 	logf("compiling baseline binary for %s (%s)", hyp.Benchmark.Name, hyp.Benchmark.Pkg)
-	if _, stderr, err := sh.Run(pkgDir, "go", "test", "-c", "-o", filepath.Join(arun, "baseline.test"), "."); err != nil {
+	if _, stderr, err := sys.Run(pkgDir, "go", "test", "-c", "-o", filepath.Join(arun, "baseline.test"), "."); err != nil {
 		return "", fmt.Errorf("baseline compile failed for %s: %s", o.ID, stderr)
 	}
 	// snapshot the test files now (after any benchmark authoring) so Verdict can detect a candidate
@@ -86,7 +85,7 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 		logf("warning: hypothesis %s has no evidence - it should cite a real signal (profile/trace)", o.ID)
 	}
 	// smoke-run once so the user sees the starting numbers
-	if out, _, err := sh.Run(pkgDir, filepath.Join(arun, "baseline.test"),
+	if out, _, err := sys.Run(pkgDir, filepath.Join(arun, "baseline.test"),
 		"-test.run=^$", "-test.bench=^"+hyp.Benchmark.Name+"$", "-test.benchmem", "-test.count=1"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if strings.HasPrefix(line, hyp.Benchmark.Name) {
@@ -125,7 +124,7 @@ func structuralGate(dir, wt, pkgDir, runDir string) string {
 	if sc == nil {
 		return ""
 	}
-	out, _, _ := sh.Run(wt, "git", "status", "--porcelain")
+	out, _, _ := sys.Run(wt, "git", "status", "--porcelain")
 	for _, line := range strings.Split(out, "\n") {
 		if len(line) < 4 {
 			continue
@@ -155,13 +154,13 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 	}
 	wt := filepath.Join(o.Dir, "wt", o.ID)
 	runDir := filepath.Join(o.Dir, "runs", o.ID)
-	arun := mustAbs(runDir)
+	arun := sys.MustAbs(runDir)
 	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
 	baselineBin := filepath.Join(arun, "baseline.test")
-	if !exists(wt) {
+	if !sys.Exists(wt) {
 		return fmt.Errorf("no worktree for %s; run bench-baseline first", o.ID)
 	}
-	if !exists(baselineBin) {
+	if !sys.Exists(baselineBin) {
 		return fmt.Errorf("no baseline binary for %s; run bench-baseline first", o.ID)
 	}
 
@@ -173,7 +172,7 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 
 	// correctness gate first - a faster-but-wrong change is a rejection, not a win
 	logf("tests: go test %s -count=1 (in worktree)", hyp.Benchmark.Pkg)
-	if tout, terr, err := sh.Run(wt, "go", "test", hyp.Benchmark.Pkg, "-count=1"); err != nil {
+	if tout, terr, err := sys.Run(wt, "go", "test", hyp.Benchmark.Pkg, "-count=1"); err != nil {
 		logf("  FAIL - correctness broken, rejecting")
 		_ = os.WriteFile(filepath.Join(runDir, "tests.txt"), []byte(tout+terr), 0o644)
 		return writeVerdict(o.Dir, o.ID, wt, false, false, "", "", "tests failed after change")
@@ -181,14 +180,14 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 
 	logf("compiling candidate binary")
 	candidateBin := filepath.Join(arun, "candidate.test")
-	if _, stderr, err := sh.Run(pkgDir, "go", "test", "-c", "-o", candidateBin, "."); err != nil {
+	if _, stderr, err := sys.Run(pkgDir, "go", "test", "-c", "-o", candidateBin, "."); err != nil {
 		return fmt.Errorf("candidate compile failed for %s: %s", o.ID, stderr)
 	}
 
 	logf("interleaved benchmarking: %d rounds of %s", o.BenchCount, hyp.Benchmark.Name)
 	csv, table := interleaveBenchstat(pkgDir, baselineBin, candidateBin, hyp.Benchmark.Name, o.BenchCount, runDir, o.Alpha)
 
-	label := benchstat.ProofLabel(hyp.Metric)
+	label := proofLabel(hyp.Metric)
 	if label == "" {
 		return fmt.Errorf("unknown metric %s", hyp.Metric)
 	}
@@ -210,7 +209,7 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 // improvement on the proof metric, with no significant regression on the other two metrics. It also
 // returns the proof metric's vs-base delta and p-value for the verdict record.
 func decideVerdict(csv, label string) (kept bool, delta, p, reason string) {
-	delta, p = benchstat.Parse(csv, label)
+	delta, p = parseBenchstat(csv, label)
 	switch {
 	case delta == "" || delta == "~":
 		reason = fmt.Sprintf("no statistically significant change in %s (benchstat: ~)", label)
@@ -225,7 +224,7 @@ func decideVerdict(csv, label string) (kept bool, delta, p, reason string) {
 		if other == label {
 			continue
 		}
-		if d, _ := benchstat.Parse(csv, other); strings.HasPrefix(d, "+") {
+		if d, _ := parseBenchstat(csv, other); strings.HasPrefix(d, "+") {
 			kept = false
 			reason += fmt.Sprintf("; but %s regressed %s", other, d)
 		}
@@ -241,17 +240,17 @@ func interleaveBenchstat(pkgDir, baseBin, headBin, bench string, rounds int, run
 	var baseOut, headOut strings.Builder
 	args := []string{"-test.run=^$", "-test.bench=^" + bench + "$", "-test.benchmem", "-test.count=1"}
 	for i := 0; i < rounds; i++ {
-		b, _, _ := sh.Run(pkgDir, baseBin, args...)
+		b, _, _ := sys.Run(pkgDir, baseBin, args...)
 		baseOut.WriteString(b)
-		c, _, _ := sh.Run(pkgDir, headBin, args...)
+		c, _, _ := sys.Run(pkgDir, headBin, args...)
 		headOut.WriteString(c)
 	}
 	baseTxt := filepath.Join(runDir, "baseline.txt")
 	headTxt := filepath.Join(runDir, "candidate.txt")
 	_ = os.WriteFile(baseTxt, []byte(baseOut.String()), 0o644)
 	_ = os.WriteFile(headTxt, []byte(headOut.String()), 0o644)
-	csv, _, _ = sh.Run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, headTxt)
-	table, _, _ = sh.Run("", "benchstat", "-alpha", alpha, baseTxt, headTxt)
+	csv, _, _ = sys.Run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, headTxt)
+	table, _, _ = sys.Run("", "benchstat", "-alpha", alpha, baseTxt, headTxt)
 	_ = os.WriteFile(filepath.Join(runDir, "benchstat.csv"), []byte(csv), 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "benchstat.txt"), []byte(table), 0o644)
 	return csv, table
@@ -284,7 +283,7 @@ func Validate(o Opts, logf func(string, ...any)) error {
 	}
 	if o.Patch != "" {
 		logf("applying patch %s in %s", o.Patch, wt)
-		if _, stderr, err := sh.Run(wt, "git", "apply", mustAbs(o.Patch)); err != nil {
+		if _, stderr, err := sys.Run(wt, "git", "apply", sys.MustAbs(o.Patch)); err != nil {
 			return fmt.Errorf("patch failed: %s", stderr)
 		}
 	}
@@ -338,7 +337,7 @@ func Regression(o RegressionOpts, logf func(string, ...any)) error {
 	logf = orNoop(logf)
 	runDir := filepath.Join(o.Dir, "runs", o.ID)
 	_ = os.MkdirAll(runDir, 0o755)
-	arun := mustAbs(runDir)
+	arun := sys.MustAbs(runDir)
 	rel := benchPkgRel(o.Pkg)
 
 	baseBin, err := buildBenchAt(o.Dir, o.Base, o.ID+"-base", rel, filepath.Join(arun, "base.test"))
@@ -366,7 +365,7 @@ func Regression(o RegressionOpts, logf func(string, ...any)) error {
 	// inverted verdict: any metric significantly WORSE in head (+) is a regression
 	var regressions, improvements []string
 	for _, m := range []string{"sec/op", "B/op", "allocs/op"} {
-		d, p := benchstat.Parse(csv, m)
+		d, p := parseBenchstat(csv, m)
 		switch {
 		case strings.HasPrefix(d, "+"):
 			regressions = append(regressions, fmt.Sprintf("%s %s (p=%s)", m, d, p))
@@ -393,20 +392,20 @@ func Regression(o RegressionOpts, logf func(string, ...any)) error {
 // buildBenchAt creates a detached worktree at ref and compiles the package's test binary.
 func buildBenchAt(dir, ref, wtName, relPkg, outBin string) (string, error) {
 	wt := filepath.Join(dir, "wt", wtName)
-	if !exists(wt) {
-		if _, stderr, err := sh.Run("", "git", "worktree", "add", "-q", "--detach", wt, ref); err != nil {
+	if !sys.Exists(wt) {
+		if _, stderr, err := sys.Run("", "git", "worktree", "add", "-q", "--detach", wt, ref); err != nil {
 			return "", fmt.Errorf("git worktree add %s at %s failed: %s", wt, ref, stderr)
 		}
 	}
 	pkgDir := filepath.Join(wt, relPkg)
-	if _, stderr, err := sh.Run(pkgDir, "go", "test", "-c", "-o", outBin, "."); err != nil {
+	if _, stderr, err := sys.Run(pkgDir, "go", "test", "-c", "-o", outBin, "."); err != nil {
 		return "", fmt.Errorf("compile bench at %s failed: %s", ref, stderr)
 	}
 	return outBin, nil
 }
 
 func benchExists(bin, bench string) bool {
-	out, _, _ := sh.Run("", bin, "-test.run=^$", "-test.bench=^"+bench+"$", "-test.count=1")
+	out, _, _ := sys.Run("", bin, "-test.run=^$", "-test.bench=^"+bench+"$", "-test.count=1")
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, bench) {
 			return true
@@ -438,18 +437,6 @@ func needsDependencyOptIn(h *model.Hypothesis, sc *hotspot.Scope) bool {
 func benchPkgRel(pkg string) string {
 	p := strings.TrimPrefix(pkg, "./")
 	return strings.TrimRight(strings.TrimSuffix(p, "..."), "/")
-}
-
-func mustAbs(p string) string {
-	if a, err := filepath.Abs(p); err == nil {
-		return a
-	}
-	return p
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func orNoop(logf func(string, ...any)) func(string, ...any) {

@@ -1,27 +1,26 @@
-// Package gcx wraps the `gcx` CLI: one retrying, diagnosable command runner over sh.Run.
-package gcx
+package collect
 
 import (
 	"fmt"
 	"strings"
 	"time"
 
-	"go-perf-agent/internal/sh"
+	"go-perf-agent/internal/sys"
 )
 
-// Run executes `gcx <args>`, retrying transient failures and surfacing gcx's real output on error
+// gcxRun executes `gcx <args>`, retrying transient failures and surfacing gcx's real output on error
 // (not a bare "exit status 1"). Permanent failures (size cap / auth / unimplemented) are not retried.
-func Run(args ...string) (string, error) {
+func gcxRun(args ...string) (string, error) {
 	var stdout, stderr string
 	var err error
 	attempts := 0
 	for attempt := 1; attempt <= 3; attempt++ {
 		attempts = attempt
-		stdout, stderr, err = sh.Run("", "gcx", args...)
+		stdout, stderr, err = sys.Run("", "gcx", args...)
 		if err == nil {
 			return stdout, nil
 		}
-		if permanent(stdout + stderr) {
+		if gcxPermanent(stdout + stderr) {
 			break
 		}
 		if attempt < 3 {
@@ -39,8 +38,8 @@ func Run(args ...string) (string, error) {
 	return stdout, fmt.Errorf("gcx %s failed after %d attempt(s): %v: %s", sub, attempts, err, detail)
 }
 
-// permanent reports whether gcx output indicates a failure a retry cannot fix.
-func permanent(out string) bool {
+// gcxPermanent reports whether gcx output indicates a failure a retry cannot fix.
+func gcxPermanent(out string) bool {
 	for _, s := range []string{"exceeds", "50 MB", "unauthorized", "not yet implemented", "invalid"} {
 		if strings.Contains(out, s) {
 			return true

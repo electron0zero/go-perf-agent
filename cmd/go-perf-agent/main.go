@@ -14,7 +14,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"go-perf-agent/internal/sh"
+	"go-perf-agent/internal/sys"
 )
 
 // config (env-overridable)
@@ -113,8 +113,7 @@ func ensureDirs() {
 	}
 }
 
-// run executes name in dir via the shared exec helper; kept as a cmd-local alias for the few
-// commands (doctor, selftest) that still shell out directly.
+// run is a cmd-local alias over the shared exec helper for `check`, which shells out directly.
 func run(dir, name string, args ...string) (string, string, error) {
-	return sh.Run(dir, name, args...)
+	return sys.Run(dir, name, args...)
 }

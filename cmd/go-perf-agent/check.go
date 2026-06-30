@@ -3,9 +3,8 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
-
-	"go-perf-agent/internal/probe"
 )
 
 // check verifies the external tools go-perf-agent shells out to, and feature-detects the gcx
@@ -30,7 +29,7 @@ func (c *checkCmd) Run() error {
 		}
 	}
 	if out, _, err := run("", "go", "version"); err == nil {
-		if v := probe.GoMinor(out); v > 0 && v < 23 {
+		if v := goMinor(out); v > 0 && v < 23 {
 			info("  WARN     go is 1.%d; go-perf-agent needs Go 1.23+", v)
 			missing = true
 		}
@@ -78,4 +77,19 @@ func checkGcx() {
 			info("  ok       gcx       %s", ck.label)
 		}
 	}
+}
+
+// goMinor parses the minor version out of `go version go1.26.4 ...`.
+func goMinor(goVersion string) int {
+	i := strings.Index(goVersion, "go1.")
+	if i < 0 {
+		return 0
+	}
+	rest := goVersion[i+len("go1."):]
+	end := strings.IndexAny(rest, ". ")
+	if end < 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(rest[:end])
+	return n
 }

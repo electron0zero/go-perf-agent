@@ -1,4 +1,4 @@
-package probe
+package main
 
 import "testing"
 
@@ -11,8 +11,8 @@ func TestGoMinor(t *testing.T) {
 		"go version devel":                 0,
 	}
 	for in, want := range cases {
-		if got := GoMinor(in); got != want {
-			t.Errorf("GoMinor(%q) = %d, want %d", in, got, want)
+		if got := goMinor(in); got != want {
+			t.Errorf("goMinor(%q) = %d, want %d", in, got, want)
 		}
 	}
 }

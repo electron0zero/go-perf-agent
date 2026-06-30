@@ -12,9 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"go-perf-agent/internal/gcx"
 	"go-perf-agent/internal/pprof"
-	"go-perf-agent/internal/sh"
+	"go-perf-agent/internal/sys"
 )
 
 // SafeServiceName flattens a gcx service_name (which may contain "/") so outputs stay flat in
@@ -116,7 +115,7 @@ func Traces(o TracesOpts, logf func(string, ...any)) error {
 	logf("tempo query -> %s", search)
 	logf("  TraceQL: %s", q)
 
-	stdout, err := gcx.Run(gcxArgs...)
+	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
 		return fmt.Errorf("collect-traces: %w\n(run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
 	}
@@ -150,7 +149,7 @@ func dumpSlowTraces(dir, searchJSON string, dump int, uid string, tflags []strin
 		if uid != "" {
 			args = append(args, "-d", uid)
 		}
-		out, err := gcx.Run(args...)
+		out, err := gcxRun(args...)
 		if err != nil {
 			logf("  could not fetch trace %s: %v (skipping)", t.TraceID, err)
 			continue
@@ -188,7 +187,7 @@ func CollectExemplars(o ExemplarsOpts, logf func(string, ...any)) error {
 
 	out := filepath.Join(o.Dir, "profiles", SafeServiceName(o.Service)+".exemplars."+o.Kind+".json")
 	logf("pyroscope %s exemplars -> %s", o.Kind, out)
-	stdout, err := gcx.Run(gcxArgs...)
+	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
 		return fmt.Errorf("collect-exemplars: %w\n(needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
 	}
@@ -251,7 +250,7 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 	collected := 0
 	var lastDest string
 	for _, k := range types {
-		dest := mustAbs(filepath.Join(o.Dir, "profiles", fmt.Sprintf("%s.%s.pb.gz", SafeServiceName(o.Service), k.kind)))
+		dest := sys.MustAbs(filepath.Join(o.Dir, "profiles", fmt.Sprintf("%s.%s.pb.gz", SafeServiceName(o.Service), k.kind)))
 		logf("pyroscope %s profile -> %s", k.kind, dest)
 		gcxArgs := append([]string{"datasources", "pyroscope", "query", sel, "--profile-type", k.pt}, tflags...)
 		gcxArgs = append(gcxArgs, "-o", "pprof", "--pprof-path", dest, "--pprof-overwrite")
@@ -261,7 +260,7 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 		for _, id := range o.ProfileIDs {
 			gcxArgs = append(gcxArgs, "--profile-id", id)
 		}
-		if _, err := gcx.Run(gcxArgs...); err != nil {
+		if _, err := gcxRun(gcxArgs...); err != nil {
 			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
 			logf("  %s query failed, skipping: %v", k.kind, err)
 			continue
@@ -290,10 +289,10 @@ type LocalOpts struct {
 // Local profiles a benchmark in this repo with go's own pprof, writing local.cpu.prof + local.mem.prof.
 func Local(o LocalOpts, logf func(string, ...any)) error {
 	logf = orNoop(logf)
-	cpu := mustAbs(filepath.Join(o.Dir, "profiles", "local.cpu.prof"))
-	mem := mustAbs(filepath.Join(o.Dir, "profiles", "local.mem.prof"))
+	cpu := sys.MustAbs(filepath.Join(o.Dir, "profiles", "local.cpu.prof"))
+	mem := sys.MustAbs(filepath.Join(o.Dir, "profiles", "local.mem.prof"))
 	logf("profiling %s (bench=%s) -> local.cpu.prof + local.mem.prof", o.Pkg, o.Bench)
-	_, stderr, err := sh.Run("", "go", "test", "-run=^$", "-bench="+o.Bench, "-benchmem",
+	_, stderr, err := sys.Run("", "go", "test", "-run=^$", "-bench="+o.Bench, "-benchmem",
 		"-benchtime="+o.Benchtime, "-count="+strconv.Itoa(o.Count),
 		"-cpuprofile="+cpu, "-memprofile="+mem, o.Pkg)
 	if err != nil {
@@ -301,14 +300,6 @@ func Local(o LocalOpts, logf func(string, ...any)) error {
 	}
 	logf("next: go-perf-agent hotspots")
 	return nil
-}
-
-// mustAbs returns p as an absolute path (gcx writes profiles there and cwd may differ), or p on error.
-func mustAbs(p string) string {
-	if a, err := filepath.Abs(p); err == nil {
-		return a
-	}
-	return p
 }
 
 func orNoop(logf func(string, ...any)) func(string, ...any) {

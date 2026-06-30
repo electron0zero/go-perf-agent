@@ -1,8 +1,8 @@
-package gcx
+package collect
 
 import "testing"
 
-func TestPermanent(t *testing.T) {
+func TestGcxPermanent(t *testing.T) {
 	permanentOut := []string{
 		"error: query exceeds 50 MB limit",
 		"this response exceeds the limit",
@@ -11,14 +11,14 @@ func TestPermanent(t *testing.T) {
 		"invalid argument",
 	}
 	for _, out := range permanentOut {
-		if !permanent(out) {
-			t.Errorf("permanent(%q) = false, want true (no point retrying)", out)
+		if !gcxPermanent(out) {
+			t.Errorf("gcxPermanent(%q) = false, want true (no point retrying)", out)
 		}
 	}
 	transient := []string{"connection reset by peer", "context deadline exceeded", ""}
 	for _, out := range transient {
-		if permanent(out) {
-			t.Errorf("permanent(%q) = true, want false (retryable)", out)
+		if gcxPermanent(out) {
+			t.Errorf("gcxPermanent(%q) = true, want false (retryable)", out)
 		}
 	}
 }
