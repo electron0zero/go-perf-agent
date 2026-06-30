@@ -1,4 +1,4 @@
-name: test
+name: ci
 
 on:
   push:
@@ -9,6 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install tools
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: make lint
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -16,6 +29,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go vet ./...
-      - run: go build ./...
-      - run: go test ./...
+      - run: make test
+
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install benchstat
+        run: |
+          go install golang.org/x/perf/cmd/benchstat@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: make eval
