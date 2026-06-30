@@ -1,14 +1,17 @@
 # eval
 
 Golden scenarios that check the go-perf-agent *engine* (not the code being optimized). Each
-scenario is a known situation with a known-correct verdict; `go-perf-agent eval` runs them and
-fails if the engine's verdict drifts. This is how we catch our own regressions when the gate,
-structural checks, or commands change.
+scenario is a known situation with a known-correct verdict; the harness runs them and fails if the
+engine's verdict drifts. This is how we catch our own regressions when the gate, structural checks,
+or commands change.
+
+The harness is its own program here in `eval/` (not a shipped `go-perf-agent` subcommand - it is dev
+/ CI only). It self-builds the `go-perf-agent` binary and drives it against each scenario:
 
 ```bash
-go-perf-agent eval                 # run every scenario 3x
-go-perf-agent eval --runs 5        # more runs = better flakiness detection
-go-perf-agent eval --only noop     # one scenario
+make eval                      # run every scenario 3x (self-builds the binary)
+go run ./eval --runs 5         # more runs = better flakiness detection
+go run ./eval --only noop      # one scenario
 ```
 
 Each scenario runs multiple times on purpose: a check that only passes sometimes is luck, not

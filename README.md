@@ -30,7 +30,7 @@ flowchart TD
     collect --> rank --> hyp --> val --> critic --> report
 ```
 
-`bench-regression` (base-vs-head) and `eval` (golden scenarios) are separate entry points.
+`bench-regression` (base-vs-head) is a separate entry point.
 
 ## How to use
 
@@ -41,7 +41,7 @@ is added to the session as an extra directory, so you do not copy anything into 
    ```bash
    git clone https://github.com/electron0zero/go-perf-agent
    cd go-perf-agent
-   go build -o go-perf-agent .
+   make build   # builds ./go-perf-agent (or: go build -o go-perf-agent ./cmd/go-perf-agent)
    ```
 2. Run Claude Code from this repo (so its `.claude/` skill and agents load), adding the target Go
    repo(s) as extra working directories:

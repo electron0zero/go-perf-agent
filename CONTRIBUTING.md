@@ -5,6 +5,10 @@ discuss it first.
 
 Before opening a PR, run `make ci` (lint, tests, golden-scenario eval) and make sure it is green.
 
+The golden-scenario suite lives in `eval/` (`make eval`, or `go run ./eval`): it builds the engine
+and checks its verdicts against known-correct scenarios. Add or update a scenario when you change the
+gate, structural checks, or a verdict path - see `eval/README.md`.
+
 ## ownership for the changes
 
 By submitting a PR you certify the [Developer Certificate of Origin](https://developercertificate.org/):

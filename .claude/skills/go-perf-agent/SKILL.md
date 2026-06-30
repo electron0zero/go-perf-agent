@@ -15,8 +15,8 @@ Findings are LLM-assisted hypotheses. A PROVED verdict means "worth shipping beh
 measuring", NOT "proven". Always tell the user to validate each accepted change in production
 against real traffic and the same telemetry before trusting it.
 
-The CLI is the `go-perf-agent` binary (a single Go program; build with `go build -o
-go-perf-agent .` from this repo and put it on PATH). Run it from the target Go module root.
+The CLI is the `go-perf-agent` binary (a single Go program; build with `make build`, or
+`go build -o go-perf-agent ./cmd/go-perf-agent`, and put it on PATH). Run it from the target Go module root.
 Working state lives in `.go-perf-agent/` (gitignored).
 
 Config (env): `GPA_BENCH_COUNT` (=6, interleave rounds) · `GPA_ALPHA` (=0.05, benchstat
@@ -44,8 +44,7 @@ separate control agent; this skill is the controller):
   behavior-preservation / benchmark-gaming and can downgrade it. Stage: CRITIQUE.
 
 Other entry points: `go-perf-agent target-diff` (review a PR / local diff - changed funcs become
-the candidate set), `go-perf-agent bench-regression` (base-vs-head regression check, no edit),
-`go-perf-agent eval` (run the golden scenarios to check the engine itself).
+the candidate set), `go-perf-agent bench-regression` (base-vs-head regression check, no edit).
 
 ## Step 0 - preflight
 
