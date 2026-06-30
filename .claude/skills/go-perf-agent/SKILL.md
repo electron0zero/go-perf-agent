@@ -132,7 +132,7 @@ benchmark that can prove it. Rules:
   than dropping a real, large lever on the floor.
 - Delegate the per-symbol analysis to parallel `gpa-analyst` agents (one per candidate
   hotspot); collect their structured objects into the array, dropping nulls.
-- When the real lever is in a vendored OSS dependency (e.g. `parquet-go`) or generated code, the
+- When the real lever is in a vendored OSS dependency (under `vendor/`) or generated code, the
   analyst still returns a normal hypothesis - with the `dependency` field set (`path`, `kind`,
   `upstream`). It goes in `hypotheses.json` like any other; it is just a hypothesis that touches a
   dependency. The harness will not auto-validate it until the user opts in by scoping to

@@ -31,22 +31,24 @@ and optionally a symptom (latency / alloc / cpu). Selectors follow OTel semantic
 (`resource.service.name`, `resource.service.namespace`) - never invent labels like
 `resource.namespace`.
 
-Window: ALWAYS ask for it - an incident has a window, and "now" usually misses it. If the user
-gives a single timestamp, query `--from <ts-5m> --to <ts+5m>` by default (a 10-minute window around
-it). If they give a range, pass `--from/--to`. Only use `--window 1h` (relative) when they
-explicitly want "recent". Profiles over many hours can exceed gcx's 50 MB cap, so prefer a tight
-window.
+Window: an incident has a time window, so prefer `--from/--to` over a relative `--window` (a single
+timestamp -> roughly +-5m around it). Keep it tight - wide profile windows can exceed gcx's 50 MB cap.
 
 Step A - find the slow operation (traces):
 ```bash
 go-perf-agent collect-traces --service <svc> --namespace <ns> --from <ts-5m> --to <ts+5m> --ds-uid <tempo-uid> --min-duration 2s
 ```
 collect-traces only COLLECTS: it writes the search result and dumps the slowest full traces to
-`.go-perf-agent/traces/`. YOU analyze the dumps - that is where the root cause usually is for a
-request-serving system. For each dumped `traces/<id>.json`, pull the defining attributes with jq:
-the query/filter string, the endpoint (`http.route` / `url.path`), and the fan-out (how many
-sub-request / scan spans it spawned). A pathological request shape (see the workload patterns in
-the catalog) is often the finding - report it even before profiling.
+`.go-perf-agent/traces/`. Then run `go-perf-agent trace-summary` to extract, from each dump, the
+request shape (query/filter, endpoint) and the span fan-out (top span names by count and duration)
+without hand-rolling jq over a multi-MB file:
+```bash
+go-perf-agent trace-summary
+```
+YOU interpret that output - that is where the root cause usually is for a request-serving system.
+A pathological request shape (always-true filter, huge fan-out; see the workload patterns in the
+catalog) is often the finding - report it even before profiling. The fan-out span names also tell
+you which service to profile next (the one doing the heavy work).
 
 Step B - pivot to the EXACT profile for a slow span (fastest path, when available):
 If a slow span carries the `pyroscope.profile.id` attribute, that value IS the span id, and
@@ -109,18 +111,18 @@ For production telemetry, the trace signal comes first and names the operation t
 ```json
 {
   "source": "production",                 // or "local-pprof"
-  "service": "tempo-ingester",            // omit for local
-  "operation": "/Push",                   // the slow operation traces identified (production)
-  "target": "pkg/parquet.(*reader).decodeRow",  // the function/codepath in focus, if any
-  "window": "2026-06-29T14:11:24Z..14:21:24Z",  // the incident window queried
-  "deployed_version": "e703ef6f",         // from collect-profiles' "deployed version:" line; the validator pins to this
+  "service": "<service>",                 // omit for local
+  "operation": "<slow operation>",        // the slow operation traces identified (production)
+  "target": "<module>/<pkg>.<Func>",      // the function/codepath in focus, if any
+  "window": "<from>..<to>",               // the incident window queried
+  "deployed_version": "<ref>",            // from collect-profiles' "deployed version:" line; the validator pins to this
   "signals": [
-    {"kind":"trace","operation":"/Push","p99_ms":420,"query":"<TraceQL>"},
+    {"kind":"trace","operation":"<slow operation>","p99_ms":420,"query":"<TraceQL>"},
     {"kind":"profile","metric":"cpu","symbol":"...","weight_pct":12.4,"scoped_by":"exemplar|service","query":"<gcx cmd>"},
     {"kind":"profile","metric":"alloc_space","symbol":"...","weight_pct":8.1,"query":"..."}
   ],
   "workload_findings": [
-    {"pattern":"no-op-filter","evidence":"query has an always-true filter that scans everything","fix":"drop the always-true filter (a query fix, not code)"}
+    {"pattern":"<workload pattern>","evidence":"<what the trace shows>","fix":"<the query/config fix, not code>"}
   ],
   "notes": "whether exemplars linked profiles to the slow spans, or a service-wide profile was used"
 }

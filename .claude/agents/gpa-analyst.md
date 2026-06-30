@@ -39,14 +39,14 @@ telemetry summary (`.go-perf-agent/telemetry/summary.json`), the profiles, and t
 
 ```json
 {
-  "id": "h-003-slice-prealloc-decodeRow",
+  "id": "h-003-slice-prealloc-decode",
   "pattern": "slice-prealloc",
-  "symbol": "github.com/grafana/tempo/pkg/parquet.(*reader).decodeRow",
-  "file": "pkg/parquet/reader.go", "line": 212,
+  "symbol": "github.com/example/app/internal/store.(*Reader).Decode",
+  "file": "internal/store/reader.go", "line": 212,
   "evidence": {"source":"pyroscope","metric":"alloc_space","value":"8.1%","query":"<gcx/go cmd>"},
-  "rationale": "decodeRow appends to a nil slice per row with a known row count; preallocate to cut growslice allocs",
+  "rationale": "Decode appends to a nil slice per row with a known count; preallocate to cut growslice allocs",
   "metric": "allocs_op",
-  "benchmark": {"pkg":"./pkg/parquet/...","name":"BenchmarkDecodeRow","needs_authoring": false},
+  "benchmark": {"pkg":"./internal/store/...","name":"BenchmarkDecode","needs_authoring": false},
   "risk": "low", "status": "proposed"
 }
 ```
@@ -56,10 +56,9 @@ telemetry summary (`.go-perf-agent/telemetry/summary.json`), the profiles, and t
 If the real lever is NOT in this module's own source, do not default to `null`:
 
 - stdlib / runtime / genuinely unfixable -> `null`.
-- A vendored OSS dependency (e.g. `github.com/parquet-go/parquet-go` under `vendor/`) is
-  changeable: it is open source we can patch and the vendored copy is in-tree, so it is
-  benchmarkable here before being upstreamed. Emit a NORMAL hypothesis and set the `dependency`
-  field (`kind: "vendored-oss"`).
+- A vendored OSS dependency (under `vendor/`) is changeable: it is open source we can patch and the
+  vendored copy is in-tree, so it is benchmarkable here before being upstreamed. Emit a NORMAL
+  hypothesis and set the `dependency` field (`kind: "vendored-oss"`).
 - Generated code (`*.pb.go`, `DO NOT EDIT`) -> emit a normal hypothesis with
   `dependency.kind: "generated"`; the eventual edit belongs in the generator / proto options.
 
@@ -68,15 +67,15 @@ any other. Set `benchmark.pkg` to the dependency's in-tree package and add the `
 
 ```json
 {
-  "id": "h-007-sync-pool-rowgrouprows-readrows",
+  "id": "h-007-sync-pool-readrows",
   "pattern": "sync-pool",
-  "symbol": "github.com/parquet-go/parquet-go.(*rowGroupRows).ReadRows",
-  "file": "vendor/github.com/parquet-go/parquet-go/row_group.go",
+  "symbol": "github.com/some/dep.(*Decoder).Read",
+  "file": "vendor/github.com/some/dep/decoder.go",
   "evidence": {"source":"pyroscope","metric":"inuse_space","value":"27%","query":"<cmd>"},
   "rationale": "what to change and why it should cut the metric",
   "metric": "B_op",
-  "benchmark": {"pkg":"./vendor/github.com/parquet-go/parquet-go","name":"","needs_authoring": true},
-  "dependency": {"path":"vendor/github.com/parquet-go/parquet-go","kind":"vendored-oss","upstream":"github.com/parquet-go/parquet-go"},
+  "benchmark": {"pkg":"./vendor/github.com/some/dep","name":"","needs_authoring": true},
+  "dependency": {"path":"vendor/github.com/some/dep","kind":"vendored-oss","upstream":"github.com/some/dep"},
   "risk": "med", "status": "proposed"
 }
 ```
