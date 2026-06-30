@@ -24,11 +24,11 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
 
 1. Baseline.
    ```bash
-   go-perf-agent bench-baseline <id>
+   go-perf-agent bench baseline <id>
    ```
    - On success it creates the worktree and compiles the pristine baseline binary.
    - If it prints `NEEDS_BENCHMARK`: the symbol has no benchmark. Author one (step 2), then
-     re-run `bench-baseline <id>`.
+     re-run `bench baseline <id>`.
 
 2. Author a benchmark + correctness test (only if needed). In `.go-perf-agent/wt/<id>/<pkg>`:
    - FOLLOW THE CODEBASE STYLE. First read the existing `*_test.go` benchmarks in this package
@@ -63,7 +63,7 @@ All commands run from the target module root. Worktree: `.go-perf-agent/wt/<id>`
 
 4. Verdict (the gate - deterministic).
    ```bash
-   go-perf-agent bench-verdict <id>
+   go-perf-agent bench verdict <id>
    ```
    It runs the correctness tests, then interleaved A/B benchmarks, then benchstat, and writes
    `.go-perf-agent/runs/<id>/verdict.json` with `status`:
@@ -112,7 +112,7 @@ confirm it is staged in the patch. The verdict JSON is the source of truth; your
 
 - One change per hypothesis. Never batch. The verdict must be attributable to that one change.
 - A faster-but-wrong change is `rejected` (the correctness test catches it) - never proved.
-- `bench-verdict` structurally rejects edits to the benchmark/test you are judged by or to any
+- `bench verdict` structurally rejects edits to the benchmark/test you are judged by or to any
   out-of-scope/vendored/generated file – so don't. Fix the production code in scope, leave the
   ruler alone. If the win genuinely needs out-of-scope changes, that's `need_more_data`.
 - `proved` means "worth shipping behind a flag and verifying in production", not "done". Say so.

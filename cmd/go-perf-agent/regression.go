@@ -2,7 +2,7 @@ package main
 
 import "go-perf-agent/internal/gate"
 
-// bench-regression: did <head> get slower than <base> for <bench>? Builds the benchmark in a
+// bench regression: did <head> get slower than <base> for <bench>? Builds the benchmark in a
 // worktree at each ref, interleaves them, and reads benchstat with an inverted verdict - a
 // significant positive delta on any metric in head is a REGRESSION. No code is edited.
 type benchRegressionCmd struct {

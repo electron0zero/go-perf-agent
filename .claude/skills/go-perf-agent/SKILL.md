@@ -44,7 +44,7 @@ separate control agent; this skill is the controller):
   behavior-preservation / benchmark-gaming and can downgrade it. Stage: CRITIQUE.
 
 Other entry points: `go-perf-agent target-diff` (review a PR / local diff - changed funcs become
-the candidate set), `go-perf-agent bench-regression` (base-vs-head regression check, no edit).
+the candidate set), `go-perf-agent bench regression` (base-vs-head regression check, no edit).
 
 ## Step 0 - preflight
 
@@ -64,26 +64,26 @@ Production-telemetry path (gcx set up + `gcx auth login`) - TRACES FIRST, then p
 say which operation is slow; profiles then explain that operation at the code level. Profiles
 alone can rank CPU that is not on the slow path.
 ```bash
-go-perf-agent collect-traces    --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # 1. slowest operations (TraceQL)
+go-perf-agent collect traces    --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # 1. slowest operations (TraceQL)
 # 2. pivot to the slow work. Fastest: a slow span's `pyroscope.profile.id` attribute IS its span
 #    id, and profiles are tagged with it under `span_id`, so fetch that exact profile directly:
-go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --span-id <pyroscope.profile.id>
+go-perf-agent collect profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --span-id <pyroscope.profile.id>
 #    Or, when present, exemplars -> profile UUIDs:
-go-perf-agent collect-exemplars --service <svc> --window 1h --ds-uid <pyro-ds-uid>
-go-perf-agent collect-profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>
+go-perf-agent collect exemplars --service <svc> --window 1h --ds-uid <pyro-ds-uid>
+go-perf-agent collect profiles  --service <svc> --window 1h --ds-uid <pyro-ds-uid> --profile-id <uuid>
 ```
 The `--span-id` pivot (traces-to-profiles, see
 https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles.md) needs
 span profiling (otel-profiling-go) on the slow service, and by default only the local root span is
 tagged. When neither span-id nor exemplars resolve, drop the flags and pull the service-wide
 profile - the trace step still narrowed you to the slow service/operation. Datasource UIDs come
-from `gcx datasources list` (or GPA_TEMPO_DS_UID / GPA_PYRO_DS). collect-profiles writes real pprof
+from `gcx datasources list` (or GPA_TEMPO_DS_UID / GPA_PYRO_DS). collect profiles writes real pprof
 (.pb.gz); hotspots parses it.
 
 Local fallback (gcx not set up / not authed) - profile with go pprof, no Grafana. This is the
 only profiles-first path:
 ```bash
-go-perf-agent collect-local --pkg ./path/to/pkg --bench BenchmarkName   # writes cpu+alloc profiles
+go-perf-agent collect local --pkg ./path/to/pkg --bench BenchmarkName   # writes cpu+alloc profiles
 # or drop an existing profile in: cp their.prof .go-perf-agent/profiles/
 ```
 In the local case, ASK the user which codepath/package/function to target - that focuses
@@ -134,18 +134,18 @@ benchmark that can prove it. Rules:
   analyst still returns a normal hypothesis - with the `dependency` field set (`path`, `kind`,
   `upstream`). It goes in `hypotheses.json` like any other; it is just a hypothesis that touches a
   dependency. The harness will not auto-validate it until the user opts in by scoping to
-  `dependency.path` (bench-baseline writes a `need_more_data` "opt-in" verdict otherwise).
+  `dependency.path` (bench baseline writes a `need_more_data` "opt-in" verdict otherwise).
 
 ## Step 4 - VALIDATE (tools measure, you edit) - one hypothesis at a time
 
 For each hypothesis id:
 
 ```bash
-go-perf-agent bench-baseline <id>        # creates .go-perf-agent/wt/<id> worktree + compiles baseline binary
+go-perf-agent bench baseline <id>        # creates .go-perf-agent/wt/<id> worktree + compiles baseline binary
 ```
 
 - If it prints `NEEDS_BENCHMARK: ...`, write a benchmark (and a correctness `Test...` if none
-  covers the symbol) in the worktree package, then re-run `bench-baseline`. The benchmark must
+  covers the symbol) in the worktree package, then re-run `bench baseline`. The benchmark must
   follow the existing benchmark style in that package (read the package's `*_test.go` first and
   match its conventions), exercise the hot path at a representative size, and call
   `b.ReportAllocs()`. If you cannot write a faithful benchmark, mark the hypothesis
@@ -157,7 +157,7 @@ go-perf-agent bench-baseline <id>        # creates .go-perf-agent/wt/<id> worktr
   patch without it can't be re-run to prove the gain.
 
 ```bash
-go-perf-agent bench-verdict <id>         # tests -> interleaved A/B benchmark -> benchstat gate
+go-perf-agent bench verdict <id>         # tests -> interleaved A/B benchmark -> benchstat gate
 ```
 
 The gate (pure, no model input): PROVED iff correctness tests pass AND the proof metric shows
@@ -195,7 +195,7 @@ patch that includes the authored benchmark - inspect/extract it with
 file). A finding handed back without its benchmark and its numbers is not reviewable. Proved
 worktrees are left intact (and staged) so the user can review and cherry-pick.
 
-Also surface any hypotheses with a `dependency` field (their bench-baseline verdict is
+Also surface any hypotheses with a `dependency` field (their bench baseline verdict is
 `need_more_data` "opt-in") under a "Dependency / generated-code changes to evaluate" heading: the
 dependency, hot symbol + weight, the proposed change, and the ship path (upstream PR or vendor
 patch). They are real hypotheses, just not validated yet because they touch code we don't own. If

@@ -4,7 +4,7 @@ End-to-end tests of the go-perf-agent *engine* (not the code being optimized), r
 program here in `e2e/` (dev/CI only, not a shipped subcommand). Each self-builds the engine binary
 and drives it:
 - `eval` - golden scenarios with known-correct verdicts; fails if the engine's verdict drifts.
-- `smoke` - runs collect-local -> hotspots against a fixture; fails if the collect->rank front-end is
+- `smoke` - runs collect local -> hotspots against a fixture; fails if the collect->rank front-end is
   broken (the half `eval` does not cover).
 
 ```bash

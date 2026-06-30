@@ -30,7 +30,7 @@ flowchart TD
     collect --> rank --> hyp --> val --> critic --> report
 ```
 
-`bench-regression` (base-vs-head) is a separate entry point.
+`bench regression` (base-vs-head) is a separate entry point.
 
 ## How to use
 
@@ -67,7 +67,7 @@ Tools on PATH (run `go-perf-agent check` to check):
 
 Production telemetry needs gcx v0.4.2+ (`go install github.com/grafana/gcx/cmd/gcx@latest`),
 authenticated with `gcx auth login`. Earlier builds lack the required `tempo query` /
-`pyroscope exemplars` / `pyroscope query -o pprof`. No gcx? `collect-local` profiles with `go pprof`.
+`pyroscope exemplars` / `pyroscope query -o pprof`. No gcx? `collect local` profiles with `go pprof`.
 
 ## Use cases
 
@@ -75,10 +75,10 @@ The same benchmark gate runs from three starting points:
 1. Production telemetry: point it at a service + time window; it finds the prod hot path
   and proposes code-level wins. Best when the service has Tempo + Pyroscope telemetry.
 2. A GitHub PR: review the changed code for optimizations, and check the PR did not make a changed
-  function slower (`bench-regression`).
+  function slower (`bench regression`).
 3. A local diff: the PR case for your own uncommitted work before you open a PR.
 
-No gcx, or don't want to grant telemetry access? Use local mode (`collect-local` then `hotspots`)
+No gcx, or don't want to grant telemetry access? Use local mode (`collect local` then `hotspots`)
 on a package you name. It works best with production telemetry, or when you already know the
 package or function you want to optimize.
 

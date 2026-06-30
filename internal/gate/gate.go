@@ -65,7 +65,7 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 
 	if hyp.Benchmark.NeedsAuthoring || hyp.Benchmark.Name == "" {
 		// not a final verdict - signal the validation agent to author a benchmark, then re-run.
-		logf("NEEDS_BENCHMARK: hypothesis %s needs a benchmark authored in %s (%s). The validation agent writes it, then re-runs bench-baseline.", o.ID, wt, hyp.Benchmark.Pkg)
+		logf("NEEDS_BENCHMARK: hypothesis %s needs a benchmark authored in %s (%s). The validation agent writes it, then re-runs bench baseline.", o.ID, wt, hyp.Benchmark.Pkg)
 		_ = model.WriteJSON(filepath.Join(runDir, "verdict.json"), model.Verdict{
 			ID: o.ID, Status: "need_more_data", Reason: "benchmark needs authoring",
 			Verdict: &model.VerdictDetail{Worktree: wt},
@@ -158,10 +158,10 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
 	baselineBin := filepath.Join(arun, "baseline.test")
 	if !helper.Exists(wt) {
-		return fmt.Errorf("no worktree for %s; run bench-baseline first", o.ID)
+		return fmt.Errorf("no worktree for %s; run bench baseline first", o.ID)
 	}
 	if !helper.Exists(baselineBin) {
-		return fmt.Errorf("no baseline binary for %s; run bench-baseline first", o.ID)
+		return fmt.Errorf("no baseline binary for %s; run bench baseline first", o.ID)
 	}
 
 	// structural gate: refuse a dishonest change (gamed ruler / out-of-scope edit) before measuring
@@ -305,9 +305,9 @@ func ValidateAll(o Opts, logf func(string, ...any)) error {
 			logf("  baseline blocked/failed for %s (see runs/%s)", h.ID, h.ID)
 			continue
 		}
-		logf("  (apply the code change in %s/wt/%s, then run: go-perf-agent bench-verdict %s)", o.Dir, h.ID, h.ID)
+		logf("  (apply the code change in %s/wt/%s, then run: go-perf-agent bench verdict %s)", o.Dir, h.ID, h.ID)
 	}
-	logf("note: validate-all only sets up baselines; the per-hypothesis code change is LLM-applied. Use the go-perf-agent skill/agents for the full loop.")
+	logf("note: validate --all only sets up baselines; the per-hypothesis code change is LLM-applied. Use the go-perf-agent skill/agents for the full loop.")
 	return nil
 }
 

@@ -117,7 +117,7 @@ func Traces(o TracesOpts, logf func(string, ...any)) error {
 
 	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
-		return fmt.Errorf("collect-traces: %w\n(run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
+		return fmt.Errorf("collect traces: %w\n(run 'gcx auth login' if the session expired; pass --ds-uid or set GPA_TEMPO_DS_UID if no tempo datasource is configured)", err)
 	}
 	if err := os.WriteFile(search, []byte(stdout), 0o644); err != nil {
 		return err
@@ -189,13 +189,13 @@ func CollectExemplars(o ExemplarsOpts, logf func(string, ...any)) error {
 	logf("pyroscope %s exemplars -> %s", o.Kind, out)
 	stdout, err := gcxRun(gcxArgs...)
 	if err != nil {
-		return fmt.Errorf("collect-exemplars: %w\n(needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
+		return fmt.Errorf("collect exemplars: %w\n(needs a gcx build with `pyroscope exemplars`; run 'gcx auth login' if expired)", err)
 	}
 	if err := os.WriteFile(out, []byte(stdout), 0o644); err != nil {
 		return err
 	}
 	summarizeExemplars(stdout, logf)
-	logf("next: collect-profiles --service %s --profile-id <uuid> ... to scope the profile to these", o.Service)
+	logf("next: collect profiles --service %s --profile-id <uuid> ... to scope the profile to these", o.Service)
 	return nil
 }
 

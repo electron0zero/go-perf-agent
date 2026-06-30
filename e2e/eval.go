@@ -77,7 +77,7 @@ type expectedSpec struct {
 	Pkg          string          `json:"pkg"`
 	Bench        string          `json:"bench"`
 	ScopeInclude []string        `json:"scope_include"`
-	BaselineOnly bool            `json:"baseline_only"` // read the verdict bench-baseline writes (e.g. dependency opt-in), skip bench-verdict
+	BaselineOnly bool            `json:"baseline_only"` // read the verdict bench baseline writes (e.g. dependency opt-in), skip bench verdict
 }
 
 type scenarioResult struct {
@@ -114,7 +114,7 @@ func runScenario(self, dir string, spec expectedSpec, benchCount int, gpaDir str
 		if err := gitInitCommit(tmp, "head"); err != nil {
 			return "", err
 		}
-		if _, e := runSelf(self, tmp, env, "bench-regression", "--pkg", spec.Pkg, "--bench", spec.Bench, "--base", base); e != nil {
+		if _, e := runSelf(self, tmp, env, "bench", "regression", "--pkg", spec.Pkg, "--bench", spec.Bench, "--base", base); e != nil {
 			return "", e
 		}
 		return readStatus(filepath.Join(tmp, gpaDir, "runs", "regression", "regression.json"))
@@ -131,21 +131,21 @@ func runScenario(self, dir string, spec expectedSpec, benchCount int, gpaDir str
 			return "", e
 		}
 	}
-	if _, e := runSelf(self, tmp, env, "bench-baseline", id); e != nil {
+	if _, e := runSelf(self, tmp, env, "bench", "baseline", id); e != nil {
 		return "", e
 	}
 	if spec.BaselineOnly {
-		// bench-baseline already wrote a terminal verdict (e.g. dependency opt-in -> need_more_data)
+		// bench baseline already wrote a terminal verdict (e.g. dependency opt-in -> need_more_data)
 		return readStatus(filepath.Join(tmp, gpaDir, "runs", id, "verdict.json"))
 	}
-	// apply the candidate change INTO THE WORKTREE (where bench-verdict judges), exactly like the
+	// apply the candidate change INTO THE WORKTREE (where bench verdict judges), exactly like the
 	// validation agent edits .go-perf-agent/wt/<id>/ - not the repo root.
 	if helper.Exists(filepath.Join(dir, "candidate")) {
 		if err := copyDir(filepath.Join(dir, "candidate"), filepath.Join(tmp, gpaDir, "wt", id)); err != nil {
 			return "", err
 		}
 	}
-	if _, e := runSelf(self, tmp, env, "bench-verdict", id); e != nil {
+	if _, e := runSelf(self, tmp, env, "bench", "verdict", id); e != nil {
 		return "", e
 	}
 	return readStatus(filepath.Join(tmp, gpaDir, "runs", id, "verdict.json"))

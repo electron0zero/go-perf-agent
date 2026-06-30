@@ -81,7 +81,7 @@ any other. Set `benchmark.pkg` to the dependency's in-tree package and add the `
 ```
 
 The harness will not auto-validate it until the user opts in (scopes to `dependency.path`); until
-then bench-baseline writes a `need_more_data` verdict telling the user how to opt in. Shipping a
+then bench baseline writes a `need_more_data` verdict telling the user how to opt in. Shipping a
 proved dependency change still needs an upstream PR or a carried vendor patch - say so.
 
 ## Rules

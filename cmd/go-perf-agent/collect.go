@@ -2,7 +2,15 @@ package main
 
 import "go-perf-agent/internal/collect"
 
-// collect-traces: the FIRST step for production telemetry. It only COLLECTS and DUMPS - it runs
+// collect groups telemetry collection: gcx traces/exemplars/profiles, and local benchmark profiling.
+type collectCmd struct {
+	Traces    collectTracesCmd    `cmd:"" help:"TraceQL: find the slowest operations via gcx tempo [needs auth]"`
+	Exemplars collectExemplarsCmd `cmd:"" help:"Pivot from a hot service to its profile UUIDs/spans via gcx [needs auth]"`
+	Profiles  collectProfilesCmd  `cmd:"" help:"Pull cpu/alloc/inuse pprof for the hot service via gcx [needs auth]"`
+	Local     collectLocalCmd     `cmd:"" help:"Profile a benchmark with go pprof [no telemetry, local data]"`
+}
+
+// collect traces: the FIRST step for production telemetry. It only COLLECTS and DUMPS - it runs
 // the TraceQL search and writes the search result plus the full JSON of the slowest traces to
 // .go-perf-agent/traces/. The agent (gpa-query-telemetry) then analyzes those dumps to pull the
 // key attributes (the query string, http.route, job/block fan-out) - the tool does not analyze.
@@ -30,9 +38,9 @@ func (c *collectTracesCmd) Run() error {
 	}, info)
 }
 
-// collect-exemplars: the trace->profile pivot. Span/profile exemplars link a hot service's
+// collect exemplars: the trace->profile pivot. Span/profile exemplars link a hot service's
 // profiles to concrete profile UUIDs (and trace spans when instrumented with otelpyroscope). The
-// agent reads the profileIds and feeds them to collect-profiles --profile-id to scope the profile
+// agent reads the profileIds and feeds them to collect profiles --profile-id to scope the profile
 // to the slow work. Requires gcx with `pyroscope exemplars` (recent builds).
 type collectExemplarsCmd struct {
 	Service     string `required:"" help:"service_name to query exemplars for"`
@@ -55,7 +63,7 @@ func (c *collectExemplarsCmd) Run() error {
 	}, info)
 }
 
-// collect-profiles: pull pyroscope cpu/alloc/inuse profiles via gcx as real pprof (.pb.gz), which
+// collect profiles: pull pyroscope cpu/alloc/inuse profiles via gcx as real pprof (.pb.gz), which
 // hotspots parses with the same google/pprof path as a local profile.
 //
 // Two ways to scope to the slow work a trace identified:
@@ -64,11 +72,11 @@ func (c *collectExemplarsCmd) Run() error {
 //	             otel-profiling-go tags profiles with the local root span's id under the `span_id`
 //	             label, so this fetches the EXACT profile for that span - the fastest trace->profile
 //	             pivot. See https://grafana.com/docs/pyroscope/latest/view-and-analyze-profile-data/traces-to-profiles.md
-//	--profile-id the profile UUIDs returned by `collect-exemplars`.
+//	--profile-id the profile UUIDs returned by `collect exemplars`.
 type collectProfilesCmd struct {
 	Service     string   `required:"" help:"service_name to profile"`
 	SpanIDs     []string `name:"span-id" help:"Scope to specific trace spans via the span_id label (the value of a span's pyroscope.profile.id); repeatable - the fastest trace->profile pivot"`
-	ProfileIDs  []string `name:"profile-id" help:"Drill into specific profile UUIDs from collect-exemplars (repeatable)"`
+	ProfileIDs  []string `name:"profile-id" help:"Drill into specific profile UUIDs from collect exemplars (repeatable)"`
 	ProfileType string   `help:"Single profile-type ID; default collects cpu+alloc+inuse"`
 	Window      string   `default:"1h" help:"Relative window, e.g. 1h (gcx --since); ignored when --from/--to are set"`
 	From        string   `help:"Absolute start (RFC3339 / unix / now-1h) - use to target a past incident window"`
@@ -86,7 +94,7 @@ func (c *collectProfilesCmd) Run() error {
 	}, info)
 }
 
-// collect-local: profile a benchmark in this repo with go's own pprof - no Grafana needed.
+// collect local: profile a benchmark in this repo with go's own pprof - no Grafana needed.
 // This is the fallback when gcx is not set up: point it at the package (and optionally the
 // function) the user wants to target, then run hotspots on the resulting profiles. Local is the
 // only profiles-first path; production starts from traces.

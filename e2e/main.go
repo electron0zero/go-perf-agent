@@ -18,7 +18,7 @@ import (
 
 var cli struct {
 	Eval  evalCmd  `cmd:"" help:"run the golden scenarios and grade the engine's verdicts"`
-	Smoke smokeCmd `cmd:"" help:"build the engine and run collect-local -> hotspots on a fixture"`
+	Smoke smokeCmd `cmd:"" help:"build the engine and run collect local -> hotspots on a fixture"`
 }
 
 func main() {

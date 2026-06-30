@@ -9,7 +9,7 @@ import (
 	"go-perf-agent/internal/trace"
 )
 
-// trace-summary does the MECHANICAL extraction from a dumped OTLP trace (collect-traces writes
+// trace-summary does the MECHANICAL extraction from a dumped OTLP trace (collect traces writes
 // them, often 10MB+): the request-shape attributes (query / endpoint) and the span fan-out (top
 // span names by count and by duration). The agent then INTERPRETS it - is the shape pathological
 // (a workload pattern), which service/operation is the slow one - instead of hand-rolling jq.
@@ -30,7 +30,7 @@ func (c *traceSummaryCmd) Run() error {
 		}
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("no dumped traces found; run collect-traces first (or pass a file)")
+		return fmt.Errorf("no dumped traces found; run collect traces first (or pass a file)")
 	}
 	for _, f := range files {
 		b, err := os.ReadFile(f)

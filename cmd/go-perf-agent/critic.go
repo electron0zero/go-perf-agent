@@ -26,7 +26,7 @@ func (c *criticCmd) Run() error {
 	path := filepath.Join(gpaDir, "runs", c.ID, "verdict.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("no verdict for %s; run bench-verdict first", c.ID)
+		return fmt.Errorf("no verdict for %s; run bench verdict first", c.ID)
 	}
 	var v model.Verdict
 	if err := json.Unmarshal(b, &v); err != nil {

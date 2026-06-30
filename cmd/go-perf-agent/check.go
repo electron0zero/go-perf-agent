@@ -43,7 +43,7 @@ func (c *checkCmd) Run() error {
 	}
 
 	if _, err := exec.LookPath("gcx"); err != nil {
-		info("  note     gcx       not found - production telemetry unavailable; `collect-local` (go pprof) still works")
+		info("  note     gcx       not found - production telemetry unavailable; `collect local` (go pprof) still works")
 	} else {
 		checkGcx()
 	}

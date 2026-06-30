@@ -32,28 +32,22 @@ var (
 // cli is the kong command tree. Each leaf is a *Cmd struct with a Run() error method (same
 // pattern as cmd/tempo-cli). kong derives kebab-case command names from the field names.
 var cli struct {
-	Check            checkCmd            `cmd:"" help:"Preflight: check required tools + gcx capabilities/min version, warn on gaps"`
-	Scope            scopeCmd            `cmd:"" help:"Set in/out-of-scope code paths for the agents"`
-	CollectTraces    collectTracesCmd    `cmd:"" help:"TraceQL: find the slowest operations via gcx tempo [production telemetry, needs auth]"`
-	CollectExemplars collectExemplarsCmd `cmd:"" help:"Pivot from a hot service to its profile UUIDs/spans via gcx [production telemetry, needs auth]"`
-	CollectProfiles  collectProfilesCmd  `cmd:"" help:"Pull cpu/alloc/inuse pprof for the hot service via gcx [production telemetry, needs auth]"`
-	CollectLocal     collectLocalCmd     `cmd:"" help:"Profile a benchmark with go pprof [no production telemetry, local data]"`
-	TraceSummary     traceSummaryCmd     `cmd:"" help:"Extract request shape + span fan-out from a dumped trace (for the agent to interpret)"`
-	Hotspots         hotspotsCmd         `cmd:"" help:"Rank hot symbols and map to packages -> hotspots.json"`
-	TargetDiff       targetDiffCmd       `cmd:"" help:"Target a PR / local diff: changed funcs become the candidate set"`
-	BenchBaseline    benchBaselineCmd    `cmd:"" help:"Create worktree + compile the pristine baseline binary"`
-	BenchVerdict     benchVerdictCmd     `cmd:"" help:"Tests + interleaved benchmark + benchstat gate"`
-	BenchRegression  benchRegressionCmd  `cmd:"" help:"Compare a benchmark base-vs-head for a regression (no edit)"`
-	Critic           criticCmd           `cmd:"" help:"Record the reflexion critic's judgment"`
-	Validate         validateCmd         `cmd:"" help:"Baseline, apply a patch, then verdict"`
-	ValidateAll      validateAllCmd      `cmd:"" help:"Set up baselines for every hypothesis"`
-	Report           reportCmd           `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
+	Check        checkCmd        `cmd:"" help:"Preflight: check required tools + gcx capabilities/min version, warn on gaps"`
+	Scope        scopeCmd        `cmd:"" help:"Set in/out-of-scope code paths for the agents"`
+	Collect      collectCmd      `cmd:"" help:"Collect telemetry (traces/exemplars/profiles) or profile a local benchmark"`
+	TraceSummary traceSummaryCmd `cmd:"" help:"Extract request shape + span fan-out from a dumped trace (for the agent to interpret)"`
+	Hotspots     hotspotsCmd     `cmd:"" help:"Rank hot symbols and map to packages -> hotspots.json"`
+	TargetDiff   targetDiffCmd   `cmd:"" help:"Target a PR / local diff: changed funcs become the candidate set"`
+	Bench        benchCmd        `cmd:"" help:"Benchmark gate: baseline, verdict, regression"`
+	Critic       criticCmd       `cmd:"" help:"Record the reflexion critic's judgment"`
+	Validate     validateCmd     `cmd:"" help:"Baseline + patch + verdict for one hypothesis (or --all to set up baselines)"`
+	Report       reportCmd       `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
 }
 
 func main() {
 	ctx := kong.Parse(&cli,
 		kong.Name("go-perf-agent"),
-		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, run 'go-perf-agent check' (preflight), then for production telemetry go traces-first: collect-traces -> collect-exemplars -> collect-profiles -> hotspots. No gcx? use collect-local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=6) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
+		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, run 'go-perf-agent check' (preflight), then for production telemetry go traces-first: collect traces -> collect exemplars -> collect profiles -> hotspots. No gcx? use collect local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=6) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 	)
