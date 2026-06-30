@@ -12,33 +12,58 @@ import (
 )
 
 func TestDecideVerdict(t *testing.T) {
-	// significant improvement on the proof metric, others not worse -> kept
+	const minImprove, regressTol = 3.0, 2.0
+
+	// significant improvement above the floor, others not worse -> kept
 	win := `,sec/op,CI,sec/op,CI,vs base,P
 Foo-8,100n,±1%,90n,±1%,-10.00%,0.002
 ,B/op,CI,B/op,CI,vs base,P
 Foo-8,12,±0%,6,±0%,-50.00%,0.001
 `
-	kept, delta, p, _ := decideVerdict(win, "sec/op")
+	kept, delta, p, _ := decideVerdict(win, "sec/op", minImprove, regressTol)
 	require.True(t, kept)
 	require.Equal(t, "-10.00%", delta)
 	require.Equal(t, "0.002", p)
 
-	// proof metric improves but another metric regresses -> rejected
+	// a significant improvement below the effect-size floor is noise, not a win -> rejected
+	tiny := `,sec/op,CI,sec/op,CI,vs base,P
+Foo-8,100n,±1%,99.5n,±1%,-0.50%,0.01
+`
+	kept, _, _, reason := decideVerdict(tiny, "sec/op", minImprove, regressTol)
+	require.False(t, kept, "a 0.5% win is below the 3% floor")
+	require.Contains(t, reason, "too small")
+
+	// proof metric improves but another regresses beyond tolerance -> rejected
 	tradeoff := `,sec/op,CI,sec/op,CI,vs base,P
 Foo-8,100n,±1%,90n,±1%,-10.00%,0.002
 ,B/op,CI,B/op,CI,vs base,P
 Foo-8,10,±0%,12,±0%,+20.00%,0.003
 `
-	kept, _, _, reason := decideVerdict(tradeoff, "sec/op")
-	require.False(t, kept, "a regression on B/op cancels the win")
+	kept, _, _, reason = decideVerdict(tradeoff, "sec/op", minImprove, regressTol)
+	require.False(t, kept, "a regression beyond tolerance cancels the win")
 	require.Contains(t, reason, "B/op regressed +20.00%", "reason names the regressing metric")
+
+	// a sub-tolerance regression on another metric does NOT cancel a real win -> kept
+	withinTol := `,sec/op,CI,sec/op,CI,vs base,P
+Foo-8,100n,±1%,90n,±1%,-10.00%,0.002
+,B/op,CI,B/op,CI,vs base,P
+Foo-8,100,±0%,101,±0%,+1.00%,0.01
+`
+	kept, _, _, _ = decideVerdict(withinTol, "sec/op", minImprove, regressTol)
+	require.True(t, kept, "a 1% B/op regression is within the 2% tolerance")
 
 	// no significant change on the proof metric -> rejected
 	noop := `,sec/op,CI,sec/op,CI,vs base,P
 Foo-8,100n,±1%,100n,±1%,~,
 `
-	kept, _, _, _ = decideVerdict(noop, "sec/op")
+	kept, _, _, _ = decideVerdict(noop, "sec/op", minImprove, regressTol)
 	require.False(t, kept, "a ~ (no significant change) is not a win")
+}
+
+func TestPctValue(t *testing.T) {
+	require.Equal(t, -19.04, pctValue("-19.04%"))
+	require.Equal(t, 0.5, pctValue("+0.5%"))
+	require.Equal(t, 0.0, pctValue("~"))
 }
 
 func TestNeedsDependencyOptIn(t *testing.T) {

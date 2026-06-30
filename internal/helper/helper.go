@@ -3,6 +3,7 @@
 package helper
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,12 @@ import (
 
 // Run executes name in dir (empty = cwd) and returns stdout, stderr, error.
 func Run(dir, name string, args ...string) (stdout, stderr string, err error) {
-	cmd := exec.Command(name, args...)
+	return RunCtx(context.Background(), dir, name, args...)
+}
+
+// RunCtx is Run bounded by ctx, so a stuck process is killed when ctx times out or is cancelled.
+func RunCtx(ctx context.Context, dir, name string, args ...string) (stdout, stderr string, err error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}

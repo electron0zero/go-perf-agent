@@ -8,7 +8,7 @@ import (
 
 // gateOpts builds the engine options from the CLI config globals.
 func gateOpts(id string) gate.Opts {
-	return gate.Opts{ID: id, Dir: gpaDir, BenchCount: benchCount, Alpha: alpha}
+	return gate.Opts{ID: id, Dir: gpaDir, BenchCount: benchCount, Alpha: alpha, MinImprovement: minImprove, RegressionTol: regressTol}
 }
 
 // bench groups the benchmark-gate subcommands.

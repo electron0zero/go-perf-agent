@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go-perf-agent/internal/helper"
@@ -20,11 +21,13 @@ import (
 
 // Opts configures a single-hypothesis run. Dir is the .go-perf-agent working dir.
 type Opts struct {
-	ID         string
-	Dir        string
-	BenchCount int
-	Alpha      string
-	Patch      string // validate only: git patch applied in the worktree before the verdict
+	ID             string
+	Dir            string
+	BenchCount     int
+	Alpha          string
+	Patch          string  // validate only: git patch applied in the worktree before the verdict
+	MinImprovement float64 // effect-size floor (%) the proof metric must clear to count as a win
+	RegressionTol  float64 // tolerance (%) a non-proof metric may regress within before killing the win
 }
 
 // Baseline creates the worktree and compiles the PRISTINE baseline test binary now, before any
@@ -185,13 +188,16 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 	}
 
 	logf("interleaved benchmarking: %d rounds of %s", o.BenchCount, hyp.Benchmark.Name)
-	csv, table := interleaveBenchstat(pkgDir, baselineBin, candidateBin, hyp.Benchmark.Name, o.BenchCount, runDir, o.Alpha)
+	csv, table, err := interleaveBenchstat(pkgDir, baselineBin, candidateBin, hyp.Benchmark.Name, o.BenchCount, runDir, o.Alpha)
+	if err != nil {
+		return err
+	}
 
 	label := proofLabel(hyp.Metric)
 	if label == "" {
 		return fmt.Errorf("unknown metric %s", hyp.Metric)
 	}
-	kept, delta, p, reason := decideVerdict(csv, label)
+	kept, delta, p, reason := decideVerdict(csv, label, o.MinImprovement, o.RegressionTol)
 
 	if err := writeVerdict(o.Dir, o.ID, wt, kept, true, delta, p, reason); err != nil {
 		return err
@@ -205,38 +211,50 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 	return nil
 }
 
-// decideVerdict reads the benchstat CSV and decides keep/reject: a statistically significant
-// improvement on the proof metric, with no significant regression on the other two metrics. It also
-// returns the proof metric's vs-base delta and p-value for the verdict record.
-func decideVerdict(csv, label string) (kept bool, delta, p, reason string) {
+// decideVerdict reads the benchstat CSV and decides keep/reject. Significance alone is not enough:
+// the proof-metric improvement must clear minImprove (an effect-size floor, so noise-level "wins" on
+// a fast bench do not count), and a significant regression on another metric only kills the win if
+// it exceeds regressTol (so a real win is not lost to a fractional blip). Both are percent.
+func decideVerdict(csv, label string, minImprove, regressTol float64) (kept bool, delta, p, reason string) {
 	delta, p = parseBenchstat(csv, label)
 	switch {
 	case delta == "" || delta == "~":
 		reason = fmt.Sprintf("no statistically significant change in %s (benchstat: ~)", label)
 	case strings.HasPrefix(delta, "-"):
-		kept = true
-		reason = fmt.Sprintf("significant improvement in %s: %s (p=%s)", label, delta, p)
+		if imp := -pctValue(delta); imp >= minImprove {
+			kept = true
+			reason = fmt.Sprintf("significant improvement in %s: %s (p=%s)", label, delta, p)
+		} else {
+			reason = fmt.Sprintf("improvement in %s too small to ship: %s (< %.1f%% floor)", label, delta, minImprove)
+		}
 	default:
 		reason = fmt.Sprintf("%s regressed or unchanged: %s", label, delta)
 	}
-	// regression guard on the other two metrics (significant positive = worse)
+	// regression guard: a significant regression on another metric kills the win only beyond tolerance
 	for _, other := range []string{"sec/op", "B/op", "allocs/op"} {
 		if other == label {
 			continue
 		}
-		if d, _ := parseBenchstat(csv, other); strings.HasPrefix(d, "+") {
+		if d, _ := parseBenchstat(csv, other); strings.HasPrefix(d, "+") && pctValue(d) > regressTol {
 			kept = false
-			reason += fmt.Sprintf("; but %s regressed %s", other, d)
+			reason += fmt.Sprintf("; but %s regressed %s (> %.1f%% tolerance)", other, d, regressTol)
 		}
 	}
 	return kept, delta, p, reason
+}
+
+// pctValue parses a benchstat "vs base" cell ("-19.04%", "+0.5%", "~") to its signed percent, or 0
+// when it is not a number (e.g. "~").
+func pctValue(delta string) float64 {
+	v, _ := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(delta), "%"), 64)
+	return v
 }
 
 // interleaveBenchstat runs two compiled test binaries alternately (run-by-run) so time-correlated
 // machine noise hits both equally, then compares them with benchstat. Shared by Verdict (HEAD vs
 // edited) and Regression (base ref vs head ref). Returns the benchstat CSV and the human table, and
 // writes baseline.txt/candidate.txt/benchstat.* in runDir.
-func interleaveBenchstat(pkgDir, baseBin, headBin, bench string, rounds int, runDir, alpha string) (csv, table string) {
+func interleaveBenchstat(pkgDir, baseBin, headBin, bench string, rounds int, runDir, alpha string) (csv, table string, err error) {
 	var baseOut, headOut strings.Builder
 	args := []string{"-test.run=^$", "-test.bench=^" + bench + "$", "-test.benchmem", "-test.count=1"}
 	for i := 0; i < rounds; i++ {
@@ -249,11 +267,15 @@ func interleaveBenchstat(pkgDir, baseBin, headBin, bench string, rounds int, run
 	headTxt := filepath.Join(runDir, "candidate.txt")
 	_ = os.WriteFile(baseTxt, []byte(baseOut.String()), 0o644)
 	_ = os.WriteFile(headTxt, []byte(headOut.String()), 0o644)
-	csv, _, _ = helper.Run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, headTxt)
+	// a benchstat failure must NOT look like "no change" - surface it, else the gate silently rejects.
+	var stderr string
+	if csv, stderr, err = helper.Run("", "benchstat", "-alpha", alpha, "-format", "csv", baseTxt, headTxt); err != nil {
+		return "", "", fmt.Errorf("benchstat failed (on PATH? valid benchmark output?): %v: %s", err, stderr)
+	}
 	table, _, _ = helper.Run("", "benchstat", "-alpha", alpha, baseTxt, headTxt)
 	_ = os.WriteFile(filepath.Join(runDir, "benchstat.csv"), []byte(csv), 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "benchstat.txt"), []byte(table), 0o644)
-	return csv, table
+	return csv, table, nil
 }
 
 func writeVerdict(dir, id, wt string, kept, tests bool, delta, p, reason string) error {
@@ -328,6 +350,7 @@ type RegressionOpts struct {
 	Pkg, Bench, Base, Head, ID string
 	Dir, Alpha                 string
 	BenchCount                 int
+	RegressionTol              float64 // a positive delta below this (%) is noise, not a regression
 }
 
 // Regression reports whether Head got slower than Base for Bench: it builds the benchmark in a
@@ -360,14 +383,17 @@ func Regression(o RegressionOpts, logf func(string, ...any)) error {
 	logf("interleaved base(%s) vs head(%s): %d rounds of %s", o.Base, o.Head, o.BenchCount, o.Bench)
 	// pkgDir for running: use the head worktree's package dir (testdata etc. from head)
 	headPkgDir := filepath.Join(o.Dir, "wt", o.ID+"-head", rel)
-	csv, table := interleaveBenchstat(headPkgDir, baseBin, headBin, o.Bench, o.BenchCount, runDir, o.Alpha)
+	csv, table, err := interleaveBenchstat(headPkgDir, baseBin, headBin, o.Bench, o.BenchCount, runDir, o.Alpha)
+	if err != nil {
+		return err
+	}
 
-	// inverted verdict: any metric significantly WORSE in head (+) is a regression
+	// inverted verdict: a significant positive delta beyond tolerance is a REGRESSION
 	var regressions, improvements []string
 	for _, m := range []string{"sec/op", "B/op", "allocs/op"} {
 		d, p := parseBenchstat(csv, m)
 		switch {
-		case strings.HasPrefix(d, "+"):
+		case strings.HasPrefix(d, "+") && pctValue(d) > o.RegressionTol:
 			regressions = append(regressions, fmt.Sprintf("%s %s (p=%s)", m, d, p))
 		case strings.HasPrefix(d, "-"):
 			improvements = append(improvements, fmt.Sprintf("%s %s", m, d))

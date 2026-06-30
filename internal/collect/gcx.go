@@ -1,7 +1,9 @@
 package collect
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -9,14 +11,18 @@ import (
 )
 
 // gcxRun executes `gcx <args>`, retrying transient failures and surfacing gcx's real output on error
-// (not a bare "exit status 1"). Permanent failures (size cap / auth / unimplemented) are not retried.
+// (not a bare "exit status 1"). Permanent failures (size cap / auth / unimplemented) are not retried;
+// each attempt is bounded by gcxTimeout so a stuck connection cannot hang the run.
 func gcxRun(args ...string) (string, error) {
 	var stdout, stderr string
 	var err error
 	attempts := 0
+	timeout := gcxTimeout()
 	for attempt := 1; attempt <= 3; attempt++ {
 		attempts = attempt
-		stdout, stderr, err = helper.Run("", "gcx", args...)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		stdout, stderr, err = helper.RunCtx(ctx, "", "gcx", args...)
+		cancel()
 		if err == nil {
 			return stdout, nil
 		}
@@ -46,4 +52,12 @@ func gcxPermanent(out string) bool {
 		}
 	}
 	return false
+}
+
+// gcxTimeout bounds each gcx attempt; override with GPA_GCX_TIMEOUT (a Go duration like "90s").
+func gcxTimeout() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv("GPA_GCX_TIMEOUT")); err == nil && d > 0 {
+		return d
+	}
+	return 120 * time.Second
 }

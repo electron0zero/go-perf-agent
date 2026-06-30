@@ -227,12 +227,17 @@ is a config recommendation, not a catalog hypothesis (no source site, no benchst
 report it separately and validate it against the production heap profile.
 Only then is the finding confirmed. Never present a proved hypothesis as "done".
 
-## Parallel validation
+## Validation: parallel setup, SERIAL benchmarking
 
-Validation parallelizes cleanly because each hypothesis works in its own
-`.go-perf-agent/wt/<id>` worktree. Spawn the `gpa-validation` agents concurrently (one message,
-multiple agent calls) rather than serially. No special runtime is needed - the isolation is the
-worktree, and the gate is the `go-perf-agent` binary.
+Each hypothesis works in its own `.go-perf-agent/wt/<id>` worktree, so the file-touching steps -
+authoring a benchmark, applying the one change, compiling the baseline (`bench baseline`) - can run
+concurrently across hypotheses.
+
+But the measurement step (`bench verdict`) MUST run one at a time. Benchmarks measure wall-clock; two
+running at once contend for CPU, cache, and memory bandwidth, which defeats the run-by-run
+interleaving the gate uses to cancel time-correlated noise. Worktree isolation prevents file
+conflicts, not measurement interference. So fan out the analysts and baseline setup if you like, but
+serialize `bench verdict` and run each on an otherwise-idle machine - else the numbers are noise.
 
 ## Cleanup
 

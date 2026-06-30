@@ -17,6 +17,6 @@ func (c *benchRegressionCmd) Run() error {
 	ensureDirs()
 	return gate.Regression(gate.RegressionOpts{
 		Pkg: c.Pkg, Bench: c.Bench, Base: c.Base, Head: c.Head, ID: c.ID,
-		Dir: gpaDir, Alpha: alpha, BenchCount: benchCount,
+		Dir: gpaDir, Alpha: alpha, BenchCount: benchCount, RegressionTol: regressTol,
 	}, info)
 }

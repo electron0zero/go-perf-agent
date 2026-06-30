@@ -20,6 +20,8 @@ var (
 	gpaDir     = env("GPA_DIR", ".go-perf-agent")
 	benchCount = envInt("GPA_BENCH_COUNT", 6) // interleave rounds for statistical significance
 	alpha      = env("GPA_ALPHA", "0.05")     // benchstat significance threshold
+	minImprove = envFloat("GPA_MIN_IMPROVEMENT", 3.0)
+	regressTol = envFloat("GPA_REGRESSION_TOL", 2.0)
 	cpuPT      = env("GPA_CPU_PT", "process_cpu:cpu:nanoseconds:cpu:nanoseconds")
 	allocPT    = env("GPA_ALLOC_PT", "memory:alloc_space:bytes:space:bytes")
 	inusePT    = env("GPA_INUSE_PT", "memory:inuse_space:bytes:space:bytes") // resident heap - the OOM signal
@@ -72,6 +74,15 @@ func envInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func envFloat(k string, def float64) float64 {
+	if v := os.Getenv(k); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return def
