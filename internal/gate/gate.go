@@ -400,6 +400,7 @@ func ValidateAll(o Opts, logf func(string, ...any)) error {
 }
 
 // RegressionVerdict is the base-vs-head outcome (distinct from the hypothesis Verdict).
+// Written to runs/<id>/regression.json - shape: schema/regression.schema.json.
 type RegressionVerdict struct {
 	ID        string `json:"id"`
 	Pkg       string `json:"pkg"`

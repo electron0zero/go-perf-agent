@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent verdict",
+  "description": "Written to .go-perf-agent/runs/<id>/verdict.json by bench verdict/baseline and updated by the critic. status and a top-level reason sit at the root; the numeric result is nested under .verdict, so query .verdict.delta, not .delta.",
+  "type": "object",
+  "required": ["id", "status"],
+  "properties": {
+    "id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["proved", "rejected", "need_more_data"],
+      "description": "proved (benchstat win + tests pass), rejected (no win / regression / tests fail), need_more_data (no faithful benchmark, within noise, dependency opt-in, or needs prod data)"
+    },
+    "reason": {
+      "type": "string",
+      "description": "root-level reason, set for need_more_data placeholders (opt-in / benchmark-needs-authoring)"
+    },
+    "verdict": {
+      "type": "object",
+      "description": "the numeric result, filled by the gate (bench verdict)",
+      "properties": {
+        "kept": { "type": "boolean" },
+        "tests_passed": { "type": "boolean" },
+        "delta": { "type": "string", "description": "benchstat delta on the proof metric, e.g. -76.55%" },
+        "p_value": { "type": "string" },
+        "reason": { "type": "string" },
+        "worktree": { "type": "string" },
+        "benchstat": { "type": "string", "description": "the full benchstat table, baseline vs candidate" }
+      }
+    },
+    "critic": {
+      "type": "object",
+      "description": "filled by the reflexion critic pass (can only downgrade a proved)",
+      "properties": {
+        "passed": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

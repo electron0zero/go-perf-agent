@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent scope",
+  "description": "In/out-of-scope code paths written to .go-perf-agent/scope.json by `scope` and `target-diff`. Read by `hotspots` (candidate tagging) and the structural gate (which rejects out-of-scope edits). Shape mirrors internal/hotspot.Scope.",
+  "type": "object",
+  "required": ["root", "include", "exclude"],
+  "properties": {
+    "root": { "type": "string", "description": "module-relative base, usually \".\"" },
+    "include": { "type": "array", "items": { "type": "string" }, "description": "path prefixes in scope (empty = whole module in scope). A trailing /... is ignored." },
+    "exclude": { "type": "array", "items": { "type": "string" }, "description": "path prefixes out of scope. Exclude wins over include." }
+  }
+}

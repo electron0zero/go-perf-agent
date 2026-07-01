@@ -26,6 +26,7 @@ type ChangedFunc struct {
 	Lines   string `json:"lines"`   // "120-145" (new-file line span of the enclosing func)
 }
 
+// Meta is written to diff.json - shape: schema/diff.schema.json.
 type Meta struct {
 	Source  string        `json:"source"` // pr | committed | uncommitted
 	PR      string        `json:"pr,omitempty"`

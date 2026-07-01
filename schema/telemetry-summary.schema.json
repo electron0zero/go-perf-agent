@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent telemetry summary",
+  "description": "Where the slowness signals came from, written to .go-perf-agent/telemetry/summary.json by gpa-query-telemetry. Read by gpa-analyst and the report's Telemetry Data section.",
+  "type": "object",
+  "required": ["source", "signals"],
+  "properties": {
+    "source": { "type": "string", "enum": ["production", "local-pprof"] },
+    "service": { "type": "string", "description": "omit for local" },
+    "operation": { "type": "string", "description": "the slow operation traces identified (production)" },
+    "target": { "type": "string", "description": "the function/codepath in focus, if any" },
+    "window": { "type": "string", "description": "the incident window queried, e.g. <from>..<to>" },
+    "deployed_version": { "type": "string", "description": "the profile's build ref - the validator pins to this" },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["trace", "profile"] },
+          "operation": { "type": "string" },
+          "metric": { "type": "string", "description": "cpu | alloc_space | inuse_space (profile signals)" },
+          "symbol": { "type": "string" },
+          "weight_pct": { "type": "number" },
+          "p99_ms": { "type": "number" },
+          "scoped_by": { "type": "string", "description": "exemplar | service" },
+          "query": { "type": "string", "description": "the exact gcx / TraceQL / go command, for reproducibility" }
+        }
+      }
+    },
+    "workload_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "evidence": { "type": "string" },
+          "fix": { "type": "string", "description": "the query/config fix, not code" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

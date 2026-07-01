@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent diff target",
+  "description": "Changed functions from a PR or local diff, written to .go-perf-agent/diff.json by `target-diff`. The changed funcs become the candidate set. Shape mirrors internal/diff.Meta.",
+  "type": "object",
+  "required": ["source", "funcs"],
+  "properties": {
+    "source": { "type": "string", "enum": ["pr", "committed", "uncommitted"] },
+    "pr": { "type": "string" },
+    "base_ref": { "type": "string" },
+    "head_ref": { "type": "string" },
+    "funcs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "package", "func", "file"],
+        "properties": {
+          "symbol": { "type": "string", "description": "module/pkg.(*Recv).Func - best-effort, for profile overlay" },
+          "package": { "type": "string", "description": "repo-relative package dir" },
+          "func": { "type": "string", "description": "Name or (*Recv).Name" },
+          "file": { "type": "string", "description": "repo-relative" },
+          "lines": { "type": "string", "description": "new-file line span of the enclosing func, e.g. 120-145" }
+        }
+      }
+    }
+  }
+}

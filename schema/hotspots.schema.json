@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent hotspots",
+  "description": "Ranked hot symbols written to .go-perf-agent/hotspots.json by `hotspots`. A JSON array of one object per (symbol, metric), sorted by weight. Read by the orchestrator and gpa-analyst. Shape mirrors internal/hotspot.Hotspot.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["rank", "symbol", "package", "weight_pct", "metric", "source", "editable", "in_scope", "candidate"],
+    "properties": {
+      "rank": { "type": "integer", "description": "1-based rank by weight_pct within the run" },
+      "symbol": { "type": "string", "description": "fully-qualified function, e.g. github.com/x/y/pkg.(*T).M" },
+      "package": { "type": "string", "description": "repo-relative package dir, or \"\" if not ours (stdlib/vendor)" },
+      "weight_pct": { "type": "number", "description": "share of its metric total (per-metric normalized percent)" },
+      "metric": { "type": "string", "description": "cpu | alloc | inuse | diff" },
+      "source": { "type": "string", "description": "pyroscope | local-pprof | diff" },
+      "editable": { "type": "boolean", "description": "in this module, not stdlib/vendor" },
+      "in_scope": { "type": "boolean", "description": "passes scope.json include/exclude" },
+      "candidate": { "type": "boolean", "description": "editable AND in_scope - the set the analyst works" }
+    }
+  }
+}

@@ -51,7 +51,7 @@ type VerdictDetail struct {
 	Benchstat   string `json:"benchstat"`
 }
 
-// Verdict is written to .go-perf-agent/runs/<id>/verdict.json. status is the final stage:
+// Verdict is written to .go-perf-agent/runs/<id>/verdict.json (shape: schema/verdict.schema.json). status is the final stage:
 // proved | rejected | need_more_data.
 type Verdict struct {
 	ID      string         `json:"id"`

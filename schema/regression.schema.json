@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "go-perf-agent regression verdict",
+  "description": "Base-vs-head regression result written to .go-perf-agent/runs/<id>/regression.json by `bench regression`. No code edit - it compares one benchmark at two refs. Shape mirrors internal/gate.RegressionVerdict.",
+  "type": "object",
+  "required": ["id", "pkg", "bench", "status"],
+  "properties": {
+    "id": { "type": "string" },
+    "pkg": { "type": "string" },
+    "bench": { "type": "string" },
+    "base_ref": { "type": "string" },
+    "head_ref": { "type": "string" },
+    "status": { "type": "string", "enum": ["regression", "clean", "inconclusive"], "description": "regression (head slower beyond tolerance), clean (no significant regression), inconclusive (benchmark missing at a ref)" },
+    "reason": { "type": "string" },
+    "benchstat": { "type": "string", "description": "the benchstat table, base vs head" }
+  }
+}

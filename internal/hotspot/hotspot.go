@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// Scope: which parts of the codebase are in/out of bounds. Entries are path prefixes relative
+// Scope (shape: schema/scope.schema.json): which parts of the codebase are in/out of bounds. Entries are path prefixes relative
 // to the module root (e.g. "pkg/parquet", "tempodb") - a trailing "/..." is ignored.
 type Scope struct {
 	Root    string   `json:"root"`
@@ -20,6 +20,7 @@ type Scope struct {
 }
 
 // Hotspot: one ranked hot symbol. candidate = editable (ours, not stdlib/vendor) AND in_scope.
+// Written to hotspots.json as an array - shape: schema/hotspots.schema.json.
 type Hotspot struct {
 	Rank      int     `json:"rank"`
 	Symbol    string  `json:"symbol"`
