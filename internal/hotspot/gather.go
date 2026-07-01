@@ -41,7 +41,7 @@ func Gather(dir, pprofPath string, topn int, modulePath string, logf func(string
 		samples = append(samples, rs...)
 	}
 	if len(samples) == 0 {
-		return nil, fmt.Errorf("no profiles found. Run collect profiles/collect local, pass --pprof FILE, or run selftest")
+		return nil, fmt.Errorf("no profiles found. Run `collect profiles` (gcx) or `collect local` (go pprof) first, or pass --pprof FILE")
 	}
 
 	sc := LoadScope(dir)

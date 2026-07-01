@@ -97,6 +97,9 @@ type TracesOpts struct {
 func Traces(o TracesOpts, logf func(string, ...any)) error {
 	logf = helper.OrNoop(logf)
 	q := BuildTraceQL(o.Service, o.Namespace, o.Query, o.MinDuration)
+	if o.Service == "" && o.Namespace == "" && o.Query == "" {
+		logf("note: no --service/--namespace/--query - matching ALL services; pass one to scope the search")
+	}
 	tflags := TimeArgs(o.Window, o.From, o.To)
 	gcxArgs := append([]string{"datasources", "tempo", "query", q}, tflags...)
 	gcxArgs = append(gcxArgs, "--limit", strconv.Itoa(o.Limit), "-o", "json")
