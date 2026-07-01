@@ -30,6 +30,23 @@ func TestRankKeepsBothMetrics(t *testing.T) {
 	require.Equal(t, 100.0, byKey[sm{mod + "/pkg/a.F", "inuse"}].WeightPct, "its own metric")
 }
 
+// equal weights rank by symbol then metric, independent of input order, so the ranking is reproducible.
+func TestRankTieBreakIsDeterministic(t *testing.T) {
+	samples := []Sample{
+		{Value: 10, Symbol: mod + "/pkg/c.Z", Metric: "alloc", Source: "pyroscope"},
+		{Value: 10, Symbol: mod + "/pkg/a.X", Metric: "alloc", Source: "pyroscope"},
+		{Value: 10, Symbol: mod + "/pkg/b.Y", Metric: "alloc", Source: "pyroscope"},
+	}
+	hots := Rank(samples, nil, mod)
+	require.Len(t, hots, 3)
+	for _, h := range hots {
+		require.InDelta(t, 33.3333, h.WeightPct, 0.001, "equal weights")
+	}
+	require.Equal(t, mod+"/pkg/a.X", hots[0].Symbol, "ties break by symbol asc")
+	require.Equal(t, mod+"/pkg/b.Y", hots[1].Symbol)
+	require.Equal(t, mod+"/pkg/c.Z", hots[2].Symbol)
+}
+
 // Rank sums the same symbol across multiple profiles of the same metric (multi-service) by absolute
 // value, instead of comparing non-comparable per-file percentages.
 func TestRankAggregatesAcrossFiles(t *testing.T) {

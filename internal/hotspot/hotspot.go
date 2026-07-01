@@ -77,8 +77,16 @@ func Rank(samples []Sample, sc *Scope, modulePath string) []Hotspot {
 			Editable: editable, InScope: scoped, Candidate: editable && scoped,
 		})
 	}
-	// stable order (seed = first-seen) so equal weights rank deterministically
-	sort.SliceStable(hots, func(i, j int) bool { return hots[i].WeightPct > hots[j].WeightPct })
+	// symbol/metric tiebreak so equal weights rank reproducibly, independent of profile input order
+	sort.Slice(hots, func(i, j int) bool {
+		if hots[i].WeightPct != hots[j].WeightPct {
+			return hots[i].WeightPct > hots[j].WeightPct
+		}
+		if hots[i].Symbol != hots[j].Symbol {
+			return hots[i].Symbol < hots[j].Symbol
+		}
+		return hots[i].Metric < hots[j].Metric
+	})
 	for i := range hots {
 		hots[i].Rank = i + 1
 	}

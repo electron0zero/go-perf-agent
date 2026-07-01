@@ -75,9 +75,21 @@ func ParseFlat(path string, topn int, dropInuse bool) ([]FuncWeight, error) {
 		}
 		byMetric[k.metric] = append(byMetric[k.metric], FuncWeight{Func: k.fn, Metric: k.metric, Value: v})
 	}
+	// fixed metric order + name tiebreak so the output is reproducible (map iteration is not)
+	metrics := make([]string, 0, len(byMetric))
+	for m := range byMetric {
+		metrics = append(metrics, m)
+	}
+	sort.Strings(metrics)
 	var out []FuncWeight
-	for _, ws := range byMetric {
-		sort.SliceStable(ws, func(i, j int) bool { return ws[i].Value > ws[j].Value })
+	for _, m := range metrics {
+		ws := byMetric[m]
+		sort.Slice(ws, func(i, j int) bool {
+			if ws[i].Value != ws[j].Value {
+				return ws[i].Value > ws[j].Value
+			}
+			return ws[i].Func < ws[j].Func
+		})
 		if topn > 0 && len(ws) > topn {
 			ws = ws[:topn]
 		}

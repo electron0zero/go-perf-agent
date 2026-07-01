@@ -56,6 +56,22 @@ func TestParseFlat(t *testing.T) {
 	require.Equal(t, "inuse", got[0].Metric)
 }
 
+// equal weights must order by function name, identically across calls (map iteration is not stable).
+func TestParseFlatDeterministicOnTies(t *testing.T) {
+	dir := t.TempDir()
+	cpu := filepath.Join(dir, "x.cpu.pb.gz")
+	writeProf(t, cpu, "cpu", "nanoseconds", map[string]int64{"a.C": 50, "a.A": 50, "a.B": 50})
+
+	first, err := ParseFlat(cpu, 0, false)
+	require.NoError(t, err)
+	got := []string{first[0].Func, first[1].Func, first[2].Func}
+	require.Equal(t, []string{"a.A", "a.B", "a.C"}, got, "ties sort by name")
+
+	again, err := ParseFlat(cpu, 0, false)
+	require.NoError(t, err)
+	require.Equal(t, first, again, "repeated parse is identical")
+}
+
 func TestVersion(t *testing.T) {
 	dir := t.TempDir()
 	m := &profile.Mapping{ID: 1, BuildID: "abc123", HasFunctions: true}
