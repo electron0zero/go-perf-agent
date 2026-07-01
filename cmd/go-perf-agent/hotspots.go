@@ -41,5 +41,8 @@ func runHotspots(pprofPath string, topn int) error {
 			shown++
 		}
 	}
+	// the seam where the loop tends to get abandoned: name the remaining stages so ranking is not
+	// mistaken for the deliverable. report.md, not a hand-written summary, is the definition of done.
+	info("NEXT (do not stop here): form %s/hypotheses.json for these candidates -> `validate`/`bench` each -> `report`. Encode config/architecture/dependency levers AS hypotheses too; the loop is not done until report.md has verdicts.", gpaDir)
 	return nil
 }

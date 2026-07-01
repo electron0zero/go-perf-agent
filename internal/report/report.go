@@ -16,14 +16,18 @@ import (
 // Render builds report.md from dir/runs/*/verdict.json and returns the markdown (no file writes).
 func Render(dir string) (string, error) {
 	files, _ := filepath.Glob(filepath.Join(dir, "runs", "*", "verdict.json"))
+	// loop-completeness gate: no verdicts means VALIDATE never ran. Fail loud instead of emitting an
+	// empty report, so the loop is not silently abandoned after collect/hotspots.
+	if len(files) == 0 {
+		return "", fmt.Errorf("no verdicts under %s/runs/ - the VALIDATE stage has not run; form %s/hypotheses.json and run `validate`/`bench` for each candidate before `report` (do not hand-write the analysis in place of the gate)", dir, dir)
+	}
 	sort.Strings(files)
 
 	var b strings.Builder
 	b.WriteString("# go-perf-agent report\n\n")
 	b.WriteString(fmt.Sprintf("Generated from `%s/runs/*/verdict.json`. Findings are LLM-assisted hypotheses - validate each proved change in production before trusting it.\n\n", dir))
-	b.WriteString("| status | id | metric Δ | p | reason |\n|---|---|---|---|---|\n")
-
 	var verdicts []model.Verdict
+	var rows [][5]string // status, id, delta, p, reason - reason last so it can flow unpadded
 	for _, f := range files {
 		raw, err := os.ReadFile(f)
 		if err != nil {
@@ -49,8 +53,9 @@ func Render(dir string) (string, error) {
 		if reason == "-" && v.Reason != "" {
 			reason = v.Reason
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", v.Status, v.ID, delta, p, reason))
+		rows = append(rows, [5]string{v.Status, v.ID, delta, p, reason})
 	}
+	b.WriteString(verdictTable(rows))
 
 	b.WriteString(telemetryCoverage(dir))
 
@@ -64,6 +69,50 @@ func Render(dir string) (string, error) {
 		b.WriteString(fmt.Sprintf("Worktree: `%s` (review the full patch, incl. the authored benchmark, with `git -C %s diff HEAD`)\n\n", v.Verdict.Worktree, v.Verdict.Worktree))
 	}
 	return b.String(), nil
+}
+
+// verdictTable renders the verdict summary as a markdown table with the fixed columns padded to their
+// widest cell, so it lines up as plain text and not only when rendered. reason is last and left free.
+func verdictTable(rows [][5]string) string {
+	head := [5]string{"status", "id", "delta", "p", "reason"}
+	w := [5]int{}
+	for i, h := range head {
+		w[i] = len(h)
+	}
+	for _, r := range rows {
+		for i := 0; i < 4; i++ { // reason (last) is not measured, it flows
+			if len(r[i]) > w[i] {
+				w[i] = len(r[i])
+			}
+		}
+	}
+	line := func(cells [5]string) string {
+		var sb strings.Builder
+		sb.WriteByte('|')
+		for i, c := range cells {
+			if i < 4 {
+				c += strings.Repeat(" ", w[i]-len(c))
+			}
+			sb.WriteString(" " + c + " |")
+		}
+		sb.WriteByte('\n')
+		return sb.String()
+	}
+	var sep [5]string
+	for i := range sep {
+		n := w[i]
+		if i == 4 {
+			n = len(head[i])
+		}
+		sep[i] = strings.Repeat("-", n)
+	}
+	var b strings.Builder
+	b.WriteString(line(head))
+	b.WriteString(line(sep))
+	for _, r := range rows {
+		b.WriteString(line(r))
+	}
+	return b.String()
 }
 
 // exemplars is the slice of an exemplars file we need: just how many came back.
