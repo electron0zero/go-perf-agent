@@ -19,7 +19,7 @@ The CLI is the `go-perf-agent` binary (a single Go program; build with `make bui
 `go build -o go-perf-agent ./cmd/go-perf-agent`, and put it on PATH). Run it from the target Go module root.
 Working state lives in `.go-perf-agent/` (gitignored).
 
-Config (env): `GPA_BENCH_COUNT` (=6, interleave rounds) · `GPA_ALPHA` (=0.05, benchstat
+Config (env): `GPA_BENCH_COUNT` (=10, interleave rounds) · `GPA_ALPHA` (=0.05, benchstat
 significance) · `GPA_PYRO_DS` · `GPA_TEMPO_DS_UID` · `GPA_DIR` (=.go-perf-agent).
 
 ## The loop
@@ -242,6 +242,12 @@ serialize `bench verdict` and run each on an otherwise-idle machine - else the n
 The engine enforces this: `bench verdict`/`bench regression` take an exclusive `bench.lock` in the
 module's `.go-perf-agent`, so a second measurement on the same module fails fast instead of quietly
 producing noise. Still schedule them serially - the lock is a backstop, not a queue.
+
+Ensure the machine is idle before measuring: on AC power (not battery), with the browser, IDE/editor,
+video, and chat closed so only the terminal is active - a laptop will still thermal-throttle, which
+widens intervals. The gate interleaves the before/after runs (benchstat's recommended practice) and
+needs enough samples: `GPA_BENCH_COUNT` defaults to 10 (benchstat's floor); raise it for smaller
+deltas. On Linux, [`perflock`](https://github.com/aclements/perflock) pins CPU frequency.
 
 ## Cleanup
 

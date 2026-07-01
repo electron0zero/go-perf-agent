@@ -52,6 +52,7 @@ func (c *checkCmd) Run() error {
 		return fmt.Errorf("missing required tools (see above)")
 	}
 	info("required tools present")
+	info("  tip: benchmark on an idle machine, and laptops connected to AC power, with Browser/IDE closed")
 	return nil
 }
 

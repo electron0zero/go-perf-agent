@@ -18,8 +18,8 @@ import (
 // config (env-overridable)
 var (
 	gpaDir     = env("GPA_DIR", ".go-perf-agent")
-	benchCount = envInt("GPA_BENCH_COUNT", 6) // interleave rounds for statistical significance
-	alpha      = env("GPA_ALPHA", "0.05")     // benchstat significance threshold
+	benchCount = envInt("GPA_BENCH_COUNT", 10) // interleave rounds; benchstat wants >=10 samples/side
+	alpha      = env("GPA_ALPHA", "0.05")      // benchstat significance threshold
 	minImprove = envFloat("GPA_MIN_IMPROVEMENT", 3.0)
 	regressTol = envFloat("GPA_REGRESSION_TOL", 2.0)
 	cpuPT      = env("GPA_CPU_PT", "process_cpu:cpu:nanoseconds:cpu:nanoseconds")
@@ -50,7 +50,7 @@ var cli struct {
 func main() {
 	ctx := kong.Parse(&cli,
 		kong.Name("go-perf-agent"),
-		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, run 'go-perf-agent check' (preflight), then for production telemetry go traces-first: collect traces -> collect exemplars -> collect profiles -> hotspots. No gcx? use collect local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=6) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
+		kong.Description("Deterministic engine for the go-perf-agent loop: collect telemetry, rank hotspots, run the benchstat gate. Findings are hypotheses - validate each in production before trusting it.\n\nEasiest start: run the go-perf-agent skill from your module root and let it drive. By hand, run 'go-perf-agent check' (preflight), then for production telemetry go traces-first: collect traces -> collect exemplars -> collect profiles -> hotspots. No gcx? use collect local (profiles-first).\n\nEnv: GPA_BENCH_COUNT(=10) GPA_ALPHA(=0.05) GPA_PYRO_DS GPA_TEMPO_DS_UID GPA_DIR(=.go-perf-agent)"),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 	)

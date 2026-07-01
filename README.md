@@ -86,8 +86,12 @@ package or function you want to optimize.
 
 - Every finding is a hypothesis. A PROVED verdict is a local-benchmark win, not truth: production
   has different hardware, inputs, and load - re-check the same telemetry in prod before trusting it.
-- Results are only as good as the machine. A noisy laptop widens confidence intervals; run on an
-  idle machine on power (not battery) for stable results.
+- Results are only as good as the machine. For stable numbers run on an idle machine on AC power
+  (not battery), and close other CPU users - browser, IDE/VS Code, video, chat - so only the terminal
+  runs; a laptop will still thermal-throttle. On Linux, [`perflock`](https://github.com/aclements/perflock)
+  pins CPU frequency. The gate interleaves the before/after runs and compares with `benchstat`, its
+  [recommended practice](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat); raise `GPA_BENCH_COUNT`
+  (default 10, benchstat's floor) for smaller deltas.
 - Without `scope`, the whole codebase is in play; use `--include`/`--exclude` to keep agents off
   vendored, generated, or frozen packages.
 - Proved changes are left in throwaway worktrees under `.go-perf-agent/wt/` for you to review and
