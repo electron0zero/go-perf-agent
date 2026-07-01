@@ -44,6 +44,7 @@ var cli struct {
 	Critic       criticCmd       `cmd:"" help:"Record the reflexion critic's judgment"`
 	Validate     validateCmd     `cmd:"" help:"Baseline + patch + verdict for one hypothesis (or --all to set up baselines)"`
 	Report       reportCmd       `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
+	Clean        cleanCmd        `cmd:"" help:"Remove per-hypothesis worktrees (--all also wipes collected + derived artifacts, keeps scope.json)"`
 }
 
 func main() {

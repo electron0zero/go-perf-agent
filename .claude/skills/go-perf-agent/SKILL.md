@@ -245,5 +245,6 @@ producing noise. Still schedule them serially - the lock is a backstop, not a qu
 
 ## Cleanup
 
-`git worktree remove .go-perf-agent/wt/<id>` for rejected/abandoned ones. Keep proved ones until
-the user has cherry-picked the change.
+Keep proved worktrees until the user has cherry-picked the change; then `go-perf-agent clean` removes
+all the per-hypothesis worktrees (full checkouts + compiled `.test` binaries) and prunes - `--all`
+also wipes collected + derived artifacts, keeping `scope.json`. For a single one, `git worktree remove .go-perf-agent/wt/<id>`.
