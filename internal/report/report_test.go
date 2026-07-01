@@ -44,9 +44,14 @@ func TestRender(t *testing.T) {
 		`"worktree":".go-perf-agent/wt/h1","benchstat":"Foo-8  100n  90n  -19.04%"}}`
 	require.NoError(t, os.WriteFile(filepath.Join(runDir, "verdict.json"), []byte(verdict), 0o644))
 
-	md, err := Render(dir)
+	md, err := Render(dir, Meta{Date: "2026-07-01 12:00 UTC", Repo: "/repo/x", Commit: "abc1234", ClosingNote: "ship the histogram fix first"})
 	require.NoError(t, err)
-	for _, want := range []string{"proved", "h1", "-19.04%", "Proved hypotheses", "Telemetry coverage"} {
+	for _, want := range []string{
+		"proved", "h1", "-19.04%", "Proved hypotheses", "Telemetry coverage", // findings + sections
+		"Telemetry Data", "Repo: /repo/x", "Commit: abc1234", // frontmatter + data section
+		"patches/h1.patch",                              // per-proved patch reference
+		"Closing Notes", "ship the histogram fix first", // closing note from Meta
+	} {
 		require.Contains(t, md, want)
 	}
 	// no profiles/traces collected -> coverage flags the production-telemetry gaps
@@ -55,7 +60,7 @@ func TestRender(t *testing.T) {
 
 // no verdicts means VALIDATE was skipped: report must fail loud, not emit an empty report.
 func TestRenderNoVerdictsErrors(t *testing.T) {
-	_, err := Render(t.TempDir())
+	_, err := Render(t.TempDir(), Meta{})
 	require.Error(t, err, "zero verdicts is a skipped VALIDATE stage")
 	require.Contains(t, err.Error(), "VALIDATE stage has not run")
 }

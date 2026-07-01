@@ -3,18 +3,54 @@
 package report
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/template"
 
+	"go-perf-agent/internal/helper"
 	"go-perf-agent/internal/model"
 )
 
-// Render builds report.md from dir/runs/*/verdict.json and returns the markdown (no file writes).
-func Render(dir string) (string, error) {
+// report.tmpl is the markdown skeleton. Editing the layout is a template change, not a code change.
+// The computed blocks (the padded verdict table, the telemetry-coverage section) are rendered by the
+// helpers below and placed into the template as-is.
+//
+//go:embed report.tmpl
+var reportTmplText string
+
+var reportTmpl = template.Must(template.New("report").Parse(reportTmplText))
+
+// Meta is the frontmatter the caller supplies (it knows the clock, cwd, and git HEAD, which the pure
+// renderer should not reach for). ClosingNote is optional - empty leaves a placeholder to fill.
+type Meta struct {
+	Date        string
+	Repo        string
+	Commit      string
+	ClosingNote string
+}
+
+// reportView is the data report.tmpl renders.
+type reportView struct {
+	Date          string
+	Repo          string
+	Commit        string
+	VerdictTable  string
+	TelemetryData string
+	Coverage      string
+	Proved        []provedView
+	ClosingNotes  string
+}
+
+type provedView struct{ ID, Benchstat, Worktree, PatchFile string }
+
+// Render builds report.md from dir/runs/*/verdict.json and returns the markdown (no file writes -
+// call WritePatches first to produce the per-proved patch files it references).
+func Render(dir string, meta Meta) (string, error) {
 	files, _ := filepath.Glob(filepath.Join(dir, "runs", "*", "verdict.json"))
 	// loop-completeness gate: no verdicts means VALIDATE never ran. Fail loud instead of emitting an
 	// empty report, so the loop is not silently abandoned after collect/hotspots.
@@ -23,11 +59,8 @@ func Render(dir string) (string, error) {
 	}
 	sort.Strings(files)
 
-	var b strings.Builder
-	b.WriteString("# go-perf-agent report\n\n")
-	b.WriteString(fmt.Sprintf("Generated from `%s/runs/*/verdict.json`. Findings are LLM-assisted hypotheses - validate each proved change in production before trusting it.\n\n", dir))
-	var verdicts []model.Verdict
 	var rows [][5]string // status, id, delta, p, reason - reason last so it can flow unpadded
+	var proved []provedView
 	for _, f := range files {
 		raw, err := os.ReadFile(f)
 		if err != nil {
@@ -37,7 +70,6 @@ func Render(dir string) (string, error) {
 		if json.Unmarshal(raw, &v) != nil {
 			continue
 		}
-		verdicts = append(verdicts, v)
 		delta, p, reason := "-", "-", "-"
 		if v.Verdict != nil {
 			if v.Verdict.Delta != "" {
@@ -54,21 +86,61 @@ func Render(dir string) (string, error) {
 			reason = v.Reason
 		}
 		rows = append(rows, [5]string{v.Status, v.ID, delta, p, reason})
-	}
-	b.WriteString(verdictTable(rows))
-
-	b.WriteString(telemetryCoverage(dir))
-
-	b.WriteString("\n## Proved hypotheses (ship behind a flag, then verify in production)\n\n")
-	for _, v := range verdicts {
-		if v.Status != "proved" || v.Verdict == nil {
-			continue
+		if v.Status == "proved" && v.Verdict != nil {
+			proved = append(proved, provedView{v.ID, strings.TrimRight(v.Verdict.Benchstat, "\n"), v.Verdict.Worktree, patchPath(dir, v.ID)})
 		}
-		b.WriteString(fmt.Sprintf("### %s\n\n```\n%s\n```\n", v.ID, strings.TrimRight(v.Verdict.Benchstat, "\n")))
-		// diff HEAD (not plain diff) so the staged, newly-authored benchmark is included in the patch
-		b.WriteString(fmt.Sprintf("Worktree: `%s` (review the full patch, incl. the authored benchmark, with `git -C %s diff HEAD`)\n\n", v.Verdict.Worktree, v.Verdict.Worktree))
+	}
+
+	closing := meta.ClosingNote
+	if closing == "" {
+		closing = "_(fill in: the overall takeaway - what to ship first, and what to re-check in production.)_"
+	}
+	view := reportView{
+		Date:          meta.Date,
+		Repo:          meta.Repo,
+		Commit:        meta.Commit,
+		VerdictTable:  strings.TrimRight(verdictTable(rows), "\n"),
+		TelemetryData: strings.TrimSpace(telemetryData(dir)),
+		Coverage:      strings.TrimSpace(telemetryCoverage(dir)),
+		Proved:        proved,
+		ClosingNotes:  closing,
+	}
+	var b strings.Builder
+	if err := reportTmpl.Execute(&b, view); err != nil {
+		return "", err
 	}
 	return b.String(), nil
+}
+
+// patchPath is the report-relative location of a proved hypothesis's patch file.
+func patchPath(dir, id string) string { return filepath.Join(dir, "patches", id+".patch") }
+
+// WritePatches writes a git patch (diff HEAD, so the staged authored benchmark is included) for each
+// proved hypothesis's worktree to dir/patches/<id>.patch, so an engineer can inspect the change and
+// `git apply` it on the target commit without the worktree.
+func WritePatches(dir string) error {
+	files, _ := filepath.Glob(filepath.Join(dir, "runs", "*", "verdict.json"))
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var v model.Verdict
+		if json.Unmarshal(raw, &v) != nil || v.Status != "proved" || v.Verdict == nil || v.Verdict.Worktree == "" {
+			continue
+		}
+		diff, _, err := helper.Run(v.Verdict.Worktree, "git", "diff", "HEAD")
+		if err != nil {
+			continue // a stale/removed worktree just has no patch file
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "patches"), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(patchPath(dir, v.ID), []byte(diff), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verdictTable renders the verdict summary as a markdown table with the fixed columns padded to their
@@ -114,6 +186,70 @@ func verdictTable(rows [][5]string) string {
 	}
 	return b.String()
 }
+
+// telemetrySummary is the slice of gpa-query-telemetry's summary.json we render: where the signals
+// came from, the window, and the queries that produced them.
+type telemetrySummary struct {
+	Source          string `json:"source"`
+	Service         string `json:"service"`
+	Window          string `json:"window"`
+	DeployedVersion string `json:"deployed_version"`
+	Signals         []struct {
+		Kind   string `json:"kind"`
+		Metric string `json:"metric"`
+		Query  string `json:"query"`
+	} `json:"signals"`
+}
+
+// telemetryData reports which source, time range, and queries produced the traces/profiles. It reads
+// gpa-query-telemetry's summary.json when present, else derives what it can from the collected files
+// (so a direct collect run, without the agent, still records what was queried).
+func telemetryData(dir string) string {
+	var b strings.Builder
+	b.WriteString("## Telemetry Data\n\n")
+	if raw, err := os.ReadFile(filepath.Join(dir, "telemetry", "summary.json")); err == nil {
+		var s telemetrySummary
+		if json.Unmarshal(raw, &s) == nil {
+			src := s.Source
+			if src == "" {
+				src = "unknown"
+			}
+			b.WriteString("Source: " + src + "\n")
+			for _, kv := range [][2]string{{"Service", s.Service}, {"Window", s.Window}, {"Deployed version", s.DeployedVersion}} {
+				if kv[1] != "" {
+					b.WriteString(kv[0] + ": " + kv[1] + "\n")
+				}
+			}
+			if len(s.Signals) > 0 {
+				b.WriteString("\nQueries:\n")
+				for _, sig := range s.Signals {
+					if sig.Query == "" {
+						continue
+					}
+					label := strings.TrimSpace(sig.Kind + " " + sig.Metric)
+					b.WriteString(fmt.Sprintf("- %s: `%s`\n", label, sig.Query))
+				}
+			}
+			return b.String()
+		}
+	}
+	// no summary.json (collection run directly, not via gpa-query-telemetry) - derive from disk.
+	b.WriteString("No telemetry summary recorded (collection run directly, not via gpa-query-telemetry). From disk:\n\n")
+	profs, _ := filepath.Glob(filepath.Join(dir, "profiles", "*.pb.gz"))
+	locals, _ := filepath.Glob(filepath.Join(dir, "profiles", "*.prof"))
+	for _, p := range append(profs, locals...) {
+		b.WriteString("- profile: `" + filepath.Base(p) + "`\n")
+	}
+	for _, t := range mustGlob(filepath.Join(dir, "traces", "*.json")) {
+		b.WriteString("- trace dump: `" + filepath.Base(t) + "`\n")
+	}
+	if dv, err := os.ReadFile(filepath.Join(dir, "deployed_version")); err == nil {
+		b.WriteString("- deployed version: " + strings.TrimSpace(string(dv)) + "\n")
+	}
+	return b.String()
+}
+
+func mustGlob(pat string) []string { m, _ := filepath.Glob(pat); return m }
 
 // exemplars is the slice of an exemplars file we need: just how many came back.
 type exemplars struct {
