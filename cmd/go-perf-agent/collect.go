@@ -97,7 +97,7 @@ func (c *collectProfilesCmd) Run() error {
 // collect local: profile a benchmark in this repo with go's own pprof - no Grafana needed.
 // This is the fallback when gcx is not set up: point it at the package (and optionally the
 // function) the user wants to target, then run hotspots on the resulting profiles. Local is the
-// only profiles-first path; production starts from traces.
+// only profiles-first path - production starts from traces.
 type collectLocalCmd struct {
 	Pkg       string `default:"." help:"single package to benchmark (e.g. ./internal/store) - not ./..."`
 	Bench     string `default:"." help:"benchmark name regex to profile (e.g. BenchmarkDecode)"`

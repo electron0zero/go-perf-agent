@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-// Summary is the mechanical extraction from one trace; the caller interprets it.
+// Summary is the mechanical extraction from one trace - the caller interprets it.
 type Summary struct {
 	SpanCount int
 	Shape     map[string]string // request-shape attribute -> representative value

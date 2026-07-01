@@ -1,5 +1,5 @@
 // Package diff turns a PR or local git diff into the set of changed Go functions, which become the
-// candidate set the perf loop targets in diff mode. Parsing is pure; collection shells out via sh.
+// candidate set the perf loop targets in diff mode. Parsing is pure - collection shells out via sh.
 package diff
 
 import (
@@ -34,7 +34,7 @@ type Meta struct {
 	Funcs   []ChangedFunc `json:"funcs"`
 }
 
-// FromGit handles local modes: `git diff <spec>` gives changed files + new-file line ranges;
+// FromGit handles local modes: `git diff <spec>` gives changed files + new-file line ranges,
 // go/ast over the current files maps those ranges to enclosing functions.
 func FromGit(spec, source, modulePath string) (Meta, error) {
 	out, stderr, err := helper.Run("", "git", "diff", spec, "--unified=0", "--", "*.go")
@@ -121,7 +121,7 @@ func parseUnifiedRanges(diff string) map[string][][2]int {
 			if m[2] != "" {
 				count, _ = strconv.Atoi(m[2])
 			}
-			if count == 0 { // pure deletion hunk; attribute to the line above
+			if count == 0 { // pure deletion hunk - attribute to the line above
 				count = 1
 			}
 			out[file] = append(out[file], [2]int{start, start + count - 1})
@@ -243,7 +243,7 @@ func receiverFromText(recv string) string {
 	return last
 }
 
-// symbolFor builds the pprof-style symbol for overlay matching. recv may carry a leading "*";
+// symbolFor builds the pprof-style symbol for overlay matching. recv may carry a leading "*" -
 // pprof renders pointer-receiver methods as pkg.(*T).M and value-receiver methods as pkg.T.M, so
 // preserve that distinction or the profile-weight overlay misses value-receiver methods.
 func symbolFor(pkgDir, recv, name, modulePath string) string {

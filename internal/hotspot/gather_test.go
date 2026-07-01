@@ -10,7 +10,7 @@ import (
 )
 
 func TestParseProfile(t *testing.T) {
-	// build a real cpu profile: foo flat = 100+50, bar flat = 30; parse it back
+	// build a real cpu profile: foo flat = 100+50, bar flat = 30 - parse it back
 	foo := &profile.Function{ID: 1, Name: "github.com/grafana/tempo/pkg/a.foo"}
 	bar := &profile.Function{ID: 2, Name: "github.com/grafana/tempo/pkg/a.bar"}
 	locFoo := &profile.Location{ID: 1, Line: []profile.Line{{Function: foo}}}

@@ -57,7 +57,7 @@ func (c *checkCmd) Run() error {
 }
 
 // checkGcx feature-detects the subcommands the production path needs. Feature detection is more
-// robust than parsing a version string; it tells the user exactly what to upgrade.
+// robust than parsing a version string - it tells the user exactly what to upgrade.
 func checkGcx() {
 	const upgrade = "upgrade gcx to v0.4.2+ (go install github.com/grafana/gcx/cmd/gcx@latest)"
 	for _, ck := range []struct {

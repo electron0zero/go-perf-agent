@@ -34,7 +34,7 @@ type benchVerdictCmd struct {
 
 func (c *benchVerdictCmd) Run() error { return gate.Verdict(gateOpts(c.ID), info) }
 
-// validate validates one hypothesis (baseline -> apply patch -> verdict); --all instead sets up
+// validate validates one hypothesis (baseline -> apply patch -> verdict) - --all instead sets up
 // baselines for every hypothesis (the per-hypothesis change is then LLM-applied).
 type validateCmd struct {
 	ID    string `arg:"" optional:"" help:"hypothesis id (omit with --all)"`

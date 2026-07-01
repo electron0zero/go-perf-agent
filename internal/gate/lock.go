@@ -34,7 +34,7 @@ func acquireBenchLock(dir string) (release func(), err error) {
 	return nil, fmt.Errorf("could not acquire bench lock %s", lock)
 }
 
-// benchLockHolder reports the pid in the lock file and whether it is still alive; signal 0 probes
+// benchLockHolder reports the pid in the lock file and whether it is still alive - signal 0 probes
 // existence without touching the process, so a dead holder marks the lock stale.
 func benchLockHolder(lock string) (pid int, alive bool) {
 	b, err := os.ReadFile(lock)

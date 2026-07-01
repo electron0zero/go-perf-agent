@@ -123,7 +123,7 @@ func TestToHotspots(t *testing.T) {
 
 	hots := ToHotspots(meta, weights)
 	require.Len(t, hots, 3)
-	// ranked by weight desc: Bar(40), Foo(5), Baz(0); ranks 1..3
+	// ranked by weight desc: Bar(40), Foo(5), Baz(0) - ranks 1..3
 	require.Equal(t, "m/pkg/b.Bar", hots[0].Symbol)
 	require.Equal(t, 40.0, hots[0].WeightPct)
 	require.Equal(t, 1, hots[0].Rank)

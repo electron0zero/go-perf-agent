@@ -16,7 +16,7 @@ func proofLabel(metric string) string {
 }
 
 // parseBenchstat reads benchstat `-format csv` and returns ("vs base", p) for one metric.
-// A metric section starts with a header row `,<label>,CI,<label>,CI,vs base,P`; the next data
+// A metric section starts with a header row `,<label>,CI,<label>,CI,vs base,P` - the next data
 // row (col 0 non-empty, not "geomean") carries vs base at col len-2 and "p=.. n=.." at col len-1.
 // vs base is "~" when not significant, else a signed percentage like "-19.04%".
 func parseBenchstat(csv, label string) (vsBase, p string) {

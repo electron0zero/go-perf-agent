@@ -46,7 +46,7 @@ func TestParseFlat(t *testing.T) {
 	require.Equal(t, "a.Foo", top2[0].Func, "heaviest first")
 	require.Equal(t, 100.0, top2[0].Value)
 
-	// dropInuse skips inuse_space (meaningless from a local benchmark); kept otherwise
+	// dropInuse skips inuse_space (meaningless from a local benchmark) - kept otherwise
 	inuse := filepath.Join(dir, "x.inuse.pb.gz")
 	writeProf(t, inuse, "inuse_space", "bytes", map[string]int64{"a.F": 100})
 	got, _ := ParseFlat(inuse, 0, true)

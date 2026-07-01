@@ -8,7 +8,7 @@ import (
 )
 
 // clean removes the per-hypothesis git worktrees created under .go-perf-agent/wt/ (full checkouts +
-// compiled .test binaries that otherwise pile up across an audit); --all also clears collected and
+// compiled .test binaries that otherwise pile up across an audit) - --all also clears collected and
 // derived artifacts. Review and cherry-pick any proved worktrees before running it.
 type cleanCmd struct {
 	All bool `help:"also remove all collected + derived artifacts (keeps scope.json)"`
@@ -17,7 +17,7 @@ type cleanCmd struct {
 func (c *cleanCmd) Run() error {
 	wts, _ := filepath.Glob(filepath.Join(gpaDir, "wt", "*"))
 	for _, wt := range wts {
-		// git worktree remove unregisters and deletes; rm fallback for a stale/unregistered dir.
+		// git worktree remove unregisters and deletes - rm fallback for a stale/unregistered dir.
 		if _, _, err := helper.Run("", "git", "worktree", "remove", "--force", wt); err != nil {
 			_ = os.RemoveAll(wt)
 		}

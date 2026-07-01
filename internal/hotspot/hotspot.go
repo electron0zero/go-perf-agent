@@ -12,7 +12,7 @@ import (
 )
 
 // Scope: which parts of the codebase are in/out of bounds. Entries are path prefixes relative
-// to the module root (e.g. "pkg/parquet", "tempodb"); a trailing "/..." is ignored.
+// to the module root (e.g. "pkg/parquet", "tempodb") - a trailing "/..." is ignored.
 type Scope struct {
 	Root    string   `json:"root"`
 	Include []string `json:"include"`

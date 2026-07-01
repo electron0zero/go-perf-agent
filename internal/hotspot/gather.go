@@ -11,7 +11,7 @@ import (
 
 // Gather parses the pprof files under dir/profiles (or a single pprofPath) into a ranked,
 // scope-tagged hotspot list. gcx-collected (.pb.gz) and local go-test (.prof) profiles parse the
-// same way; the only difference is the local-vs-pyroscope policy in parseProfile. logf takes
+// same way - the only difference is the local-vs-pyroscope policy in parseProfile. logf takes
 // progress lines (pass nil for silent) so this package owns no CLI output.
 func Gather(dir, pprofPath string, topn int, modulePath string, logf func(string, ...any)) ([]Hotspot, error) {
 	if logf == nil {
