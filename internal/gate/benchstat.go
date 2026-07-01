@@ -42,3 +42,24 @@ func parseBenchstat(csv, label string) (vsBase, p string) {
 	}
 	return "", ""
 }
+
+// benchstatRowCount counts the data rows in the proof-metric section. More than one means the
+// benchmark has b.Run subtests and parseBenchstat is reading only the first - the caller warns so the
+// hypothesis can target a specific subtest instead of silently measuring one of several.
+func benchstatRowCount(csv, label string) int {
+	inSection, n := false, 0
+	for _, line := range strings.Split(csv, "\n") {
+		if strings.Contains(line, ","+label+",CI") {
+			inSection = true
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			inSection = false
+			continue
+		}
+		if cols := strings.Split(line, ","); inSection && len(cols) >= 7 && cols[0] != "" && cols[0] != "geomean" {
+			n++
+		}
+	}
+	return n
+}

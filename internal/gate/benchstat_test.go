@@ -44,3 +44,19 @@ Foo-8,100n,±1%,90n,±1%,-10.00%,0.002 (n=6)
 	_, p := parseBenchstat(csv, "sec/op")
 	require.Equal(t, "0.002", p, "trailing n stripped")
 }
+
+func TestBenchstatRowCount(t *testing.T) {
+	single := `,sec/op,CI,sec/op,CI,vs base,P
+Foo-8,100n,±1%,90n,±1%,-10.00%,0.002
+`
+	require.Equal(t, 1, benchstatRowCount(single, "sec/op"))
+
+	// b.Run subtests -> multiple rows (geomean excluded); the gate warns it reads only the first
+	subtests := `,sec/op,CI,sec/op,CI,vs base,P
+Foo/small-8,100n,±1%,90n,±1%,-10.00%,0.002
+Foo/large-8,200n,±1%,180n,±1%,-10.00%,0.003
+geomean,,,,,~,
+`
+	require.Equal(t, 2, benchstatRowCount(subtests, "sec/op"))
+	require.Equal(t, 0, benchstatRowCount(subtests, "B/op"), "absent metric")
+}

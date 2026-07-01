@@ -197,6 +197,9 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 	if label == "" {
 		return fmt.Errorf("unknown metric %s", hyp.Metric)
 	}
+	if n := benchstatRowCount(csv, label); n > 1 {
+		logf("warning: %s has %d benchmark rows (b.Run subtests); the gate reads only the first - name a specific subtest in the hypothesis benchmark to measure the one you mean", hyp.Benchmark.Name, n)
+	}
 	kept, delta, p, reason := decideVerdict(csv, label, o.MinImprovement, o.RegressionTol)
 
 	if err := writeVerdict(o.Dir, o.ID, wt, kept, true, delta, p, reason); err != nil {
