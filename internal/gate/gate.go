@@ -167,6 +167,13 @@ func Verdict(o Opts, logf func(string, ...any)) error {
 		return fmt.Errorf("no baseline binary for %s; run bench baseline first", o.ID)
 	}
 
+	// serialize measurement: a concurrent bench would contend for CPU and defeat the interleaving
+	release, err := acquireBenchLock(o.Dir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	// structural gate: refuse a dishonest change (gamed ruler / out-of-scope edit) before measuring
 	if reason := structuralGate(o.Dir, wt, pkgDir, runDir); reason != "" {
 		logf("  REJECTED (structural): %s", reason)
@@ -365,6 +372,13 @@ func Regression(o RegressionOpts, logf func(string, ...any)) error {
 	_ = os.MkdirAll(runDir, 0o755)
 	arun := helper.MustAbs(runDir)
 	rel := benchPkgRel(o.Pkg)
+
+	// serialize measurement: a concurrent bench would contend for CPU and defeat the interleaving
+	release, err := acquireBenchLock(o.Dir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	baseBin, err := buildBenchAt(o.Dir, o.Base, o.ID+"-base", rel, filepath.Join(arun, "base.test"))
 	if err != nil {

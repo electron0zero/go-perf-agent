@@ -239,6 +239,10 @@ interleaving the gate uses to cancel time-correlated noise. Worktree isolation p
 conflicts, not measurement interference. So fan out the analysts and baseline setup if you like, but
 serialize `bench verdict` and run each on an otherwise-idle machine - else the numbers are noise.
 
+The engine enforces this: `bench verdict`/`bench regression` take an exclusive `bench.lock` in the
+module's `.go-perf-agent`, so a second measurement on the same module fails fast instead of quietly
+producing noise. Still schedule them serially - the lock is a backstop, not a queue.
+
 ## Cleanup
 
 `git worktree remove .go-perf-agent/wt/<id>` for rejected/abandoned ones. Keep proved ones until
