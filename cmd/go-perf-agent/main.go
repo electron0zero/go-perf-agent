@@ -1,6 +1,6 @@
 // Command go-perf-agent is the deterministic engine of the go-perf-agent loop: collect telemetry,
 // rank hotspots, set up worktrees, run interleaved benchmarks, and gate with benchstat. The LLM
-// stages live in the Claude skill/agents under .claude/; the reusable libraries live in internal/.
+// stages live in the Claude skill/agents under .claude/ - the reusable libraries live in internal/.
 //
 // Findings are hypotheses: always validate an accepted change in production before trusting it.
 package main
@@ -18,7 +18,7 @@ import (
 // config (env-overridable)
 var (
 	gpaDir     = env("GPA_DIR", ".go-perf-agent")
-	benchCount = envInt("GPA_BENCH_COUNT", 10) // interleave rounds; benchstat wants >=10 samples/side
+	benchCount = envInt("GPA_BENCH_COUNT", 10) // interleave rounds - benchstat wants >=10 samples/side
 	alpha      = env("GPA_ALPHA", "0.05")      // benchstat significance threshold
 	minImprove = envFloat("GPA_MIN_IMPROVEMENT", 3.0)
 	regressTol = envFloat("GPA_REGRESSION_TOL", 2.0)
@@ -44,6 +44,7 @@ var cli struct {
 	Critic       criticCmd       `cmd:"" help:"Record the reflexion critic's judgment"`
 	Validate     validateCmd     `cmd:"" help:"Baseline + patch + verdict for one hypothesis (or --all to set up baselines)"`
 	Report       reportCmd       `cmd:"" help:"Write report.md from the per-hypothesis verdicts"`
+	Status       statusCmd       `cmd:"" help:"Loop-completeness check (fails if stopped before report.md) - with an id, print that verdict"`
 	Clean        cleanCmd        `cmd:"" help:"Remove per-hypothesis worktrees (--all also wipes collected + derived artifacts, keeps scope.json)"`
 }
 
