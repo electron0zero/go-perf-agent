@@ -11,15 +11,19 @@ import (
 
 // critic records the reflexion critic's judgment on a hypothesis verdict. It is asymmetric by
 // design: a reject can only DOWNGRADE a PROVED to need_more_data (catching behavior changes or
-// benchmark-gaming the numeric gate missed); it can never promote a rejection. This keeps the
+// benchmark-gaming the numeric gate missed) - it can never promote a rejection. This keeps the
 // numeric gate authoritative for wins while letting a distinct pass veto false positives.
 type criticCmd struct {
 	ID     string `arg:"" help:"hypothesis id"`
+	Pass   bool   `help:"the critic passed the change (the default - explicit for clarity)"`
 	Reject bool   `help:"the critic rejected the change (downgrades a PROVED to need_more_data)"`
 	Reason string `help:"the critic's reason (required with --reject)"`
 }
 
 func (c *criticCmd) Run() error {
+	if c.Pass && c.Reject {
+		return fmt.Errorf("--pass and --reject are mutually exclusive")
+	}
 	if c.Reject && c.Reason == "" {
 		return fmt.Errorf("--reject requires --reason")
 	}
