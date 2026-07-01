@@ -16,7 +16,7 @@ type Benchmark struct {
 }
 
 // Dependency marks a hypothesis whose fix lives in a dependency we don't own but can change: a
-// vendored OSS module (in-tree, so benchmarkable) or generated code. It is a normal hypothesis;
+// vendored OSS module (in-tree, so benchmarkable) or generated code. It is a normal hypothesis -
 // the harness just requires the user to opt in (put Path in scope) before validating it, and the
 // change must be upstreamed or carried as a vendor patch to actually ship.
 type Dependency struct {
@@ -25,7 +25,8 @@ type Dependency struct {
 	Upstream string `json:"upstream,omitempty"` // where to upstream it, e.g. github.com/parquet-go/parquet-go
 }
 
-// Hypothesis matches schema/hypothesis.schema.json. Authored by the LLM; consumed by the harness.
+// Hypothesis matches schema/hypothesis.schema.json. Authored by the LLM, consumed by the harness.
+// Status is owned by the per-run verdict.json, not tracked here.
 type Hypothesis struct {
 	ID         string          `json:"id"`
 	Pattern    string          `json:"pattern"`
@@ -38,7 +39,6 @@ type Hypothesis struct {
 	Benchmark  Benchmark       `json:"benchmark"`
 	Dependency *Dependency     `json:"dependency,omitempty"` // set when the fix is in a dependency
 	Risk       string          `json:"risk,omitempty"`
-	Status     string          `json:"status,omitempty"`
 }
 
 type VerdictDetail struct {
@@ -62,14 +62,14 @@ type Verdict struct {
 }
 
 // CriticReview records a structurally-distinct critique. The critic may only downgrade a PROVED
-// (semantic/behavior concerns the numeric gate cannot see); it can never promote a rejection.
+// (semantic/behavior concerns the numeric gate cannot see) - it can never promote a rejection.
 type CriticReview struct {
 	Passed bool   `json:"passed"`
 	Reason string `json:"reason"`
 }
 
 // ApplyCritic records the critic's review on v and downgrades a PROVED verdict to need_more_data
-// when the critic rejects it (a veto on wins the numeric gate cannot see; never promotes a
+// when the critic rejects it (a veto on wins the numeric gate cannot see - never promotes a
 // rejection). Returns true iff it downgraded.
 func (v *Verdict) ApplyCritic(reject bool, reason string) (downgraded bool) {
 	v.Critic = &CriticReview{Passed: !reject, Reason: reason}
@@ -108,6 +108,23 @@ func GetHypothesis(dir, id string) (*Hypothesis, error) {
 		}
 	}
 	return nil, fmt.Errorf("no hypothesis %s in %s/hypotheses.json", id, dir)
+}
+
+// SetBenchmarkName records an authored benchmark on a hypothesis (name + clears needs_authoring), so
+// a bench baseline re-run after authoring proceeds without the agent hand-editing hypotheses.json.
+func SetBenchmarkName(dir, id, name string) error {
+	hs, err := LoadHypotheses(dir)
+	if err != nil {
+		return err
+	}
+	for i := range hs {
+		if hs[i].ID == id {
+			hs[i].Benchmark.Name = name
+			hs[i].Benchmark.NeedsAuthoring = false
+			return WriteJSON(filepath.Join(dir, "hypotheses.json"), hs)
+		}
+	}
+	return fmt.Errorf("no hypothesis %s in %s/hypotheses.json", id, dir)
 }
 
 func WriteJSON(path string, v any) error {

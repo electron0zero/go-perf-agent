@@ -1,6 +1,6 @@
 // Package collect pulls production telemetry via the gcx CLI: TraceQL searches + trace dumps,
 // pyroscope exemplars (the trace->profile pivot), and cpu/alloc/inuse profiles as pprof. It also
-// profiles a local benchmark when gcx is not set up. Logic only; the cmd layer owns flags/config.
+// profiles a local benchmark when gcx is not set up. Logic only - the cmd layer owns flags/config.
 package collect
 
 import (
@@ -64,7 +64,7 @@ func BuildTraceQL(service, namespace, query, minDuration string) string {
 	return "{ " + strings.Join(sel, " && ") + " }"
 }
 
-// Search is the slice of the gcx/Tempo search response we rank by; a small local struct, not a
+// Search is the slice of the gcx/Tempo search response we rank by - a small local struct, not a
 // tempo import (only these fields matter for picking the slow operation).
 type Search struct {
 	Traces []struct {
@@ -93,7 +93,7 @@ type TracesOpts struct {
 }
 
 // Traces runs the TraceQL search, writes the search result, and dumps the slowest full traces for
-// the agent to analyze. It only collects; analysis is a separate step.
+// the agent to analyze. It only collects - analysis is a separate step.
 func Traces(o TracesOpts, logf func(string, ...any)) error {
 	logf = helper.OrNoop(logf)
 	q := BuildTraceQL(o.Service, o.Namespace, o.Query, o.MinDuration)
@@ -218,7 +218,7 @@ func summarizeExemplars(stdout string, logf func(string, ...any)) {
 	}
 }
 
-// ProfilesOpts configures pyroscope profile collection. ProfileType collects a single type;
+// ProfilesOpts configures pyroscope profile collection. ProfileType collects a single type -
 // otherwise cpu+alloc+inuse (the CPUPT/AllocPT/InusePT ids) are collected.
 type ProfilesOpts struct {
 	Service                 string
@@ -246,7 +246,7 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 	sel := fmt.Sprintf(`{service_name="%s"}`, o.Service)
 	if len(o.SpanIDs) > 0 {
 		// span_id = the value of a span's pyroscope.profile.id (otel-profiling-go labels profiles
-		// with the local root span's id); fetches the exact profile for those spans.
+		// with the local root span's id) - fetches the exact profile for those spans.
 		sel = fmt.Sprintf(`{service_name="%s", span_id=~"%s"}`, o.Service, strings.Join(o.SpanIDs, "|"))
 	}
 	tflags := TimeArgs(o.Window, o.From, o.To)
@@ -264,7 +264,7 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 			gcxArgs = append(gcxArgs, "--profile-id", id)
 		}
 		if _, err := gcxRun(gcxArgs...); err != nil {
-			// non-fatal: a service may lack one profile type (e.g. no inuse); keep the others.
+			// non-fatal: a service may lack one profile type (e.g. no inuse) - keep the others.
 			logf("  %s query failed, skipping: %v", k.kind, err)
 			continue
 		}
@@ -274,9 +274,10 @@ func Profiles(o ProfilesOpts, logf func(string, ...any)) error {
 	if collected == 0 {
 		return fmt.Errorf("pyroscope query returned no profile for %q (run 'gcx auth login' if the session expired; for a 6h+ window the response can exceed gcx's 50MB cap - narrow --window/--from/--to)", o.Service)
 	}
-	// surface the deployed version so the agent can validate against the matching source ref.
+	// persist + surface the deployed version so validation can pin against the matching source ref
 	if v := pprof.Version(lastDest); v != "" {
-		logf("deployed version: %s (validate against this ref, not necessarily HEAD)", v)
+		_ = os.WriteFile(filepath.Join(o.Dir, "deployed_version"), []byte(v+"\n"), 0o644)
+		logf("deployed version: %s (saved to %s/deployed_version - validate against this ref, not necessarily HEAD)", v, o.Dir)
 	}
 	logf("next: go-perf-agent hotspots")
 	return nil

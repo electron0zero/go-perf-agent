@@ -1,7 +1,7 @@
 // Package gate is the benchmarking engine: it sets up per-hypothesis worktrees, compiles pristine
 // baseline binaries, runs interleaved A/B benchmarks, and decides PROVED / REJECTED / NEED_MORE_DATA
-// with benchstat. It also runs the base-vs-head regression check. The numeric gate decides; no model
-// opinion enters keep/reject. logf takes progress (caller routes it; pass nil for silent).
+// with benchstat. It also runs the base-vs-head regression check. Keep/reject comes from benchstat
+// alone, so a win is measured, not asserted. logf takes progress (caller routes it - pass nil for silent).
 package gate
 
 import (
@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +30,16 @@ type Opts struct {
 	Patch          string  // validate only: git patch applied in the worktree before the verdict
 	MinImprovement float64 // effect-size floor (%) the proof metric must clear to count as a win
 	RegressionTol  float64 // tolerance (%) a non-proof metric may regress within before killing the win
+}
+
+// versionPinNote surfaces the deployed ref the telemetry came from against the worktree HEAD being
+// measured, so measuring code the prod numbers did not come from is visible. "" when unknown.
+func versionPinNote(dir, head string) string {
+	dv, err := os.ReadFile(filepath.Join(dir, "deployed_version"))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("version pin: baseline off HEAD %s, telemetry from deployed version %s - validate against the matching ref if they differ", head, strings.TrimSpace(string(dv)))
 }
 
 // Baseline creates the worktree and compiles the PRISTINE baseline test binary now, before any
@@ -65,18 +77,46 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 			return "", fmt.Errorf("git worktree add failed: %s", stderr)
 		}
 	}
-
-	if hyp.Benchmark.NeedsAuthoring || hyp.Benchmark.Name == "" {
-		// not a final verdict - signal the validation agent to author a benchmark, then re-run.
-		logf("NEEDS_BENCHMARK: hypothesis %s needs a benchmark authored in %s (%s). The validation agent writes it, then re-runs bench baseline.", o.ID, wt, hyp.Benchmark.Pkg)
-		_ = model.WriteJSON(filepath.Join(runDir, "verdict.json"), model.Verdict{
-			ID: o.ID, Status: "need_more_data", Reason: "benchmark needs authoring",
-			Verdict: &model.VerdictDetail{Worktree: wt},
-		})
-		return wt, nil
+	head, _, _ := helper.Run(wt, "git", "rev-parse", "--short", "HEAD")
+	if note := versionPinNote(o.Dir, strings.TrimSpace(head)); note != "" {
+		logf("%s", note)
 	}
 
 	pkgDir := filepath.Join(wt, benchPkgRel(hyp.Benchmark.Pkg))
+
+	// resolve the benchmark. Adopt an authored one from the worktree so a re-run after authoring
+	// proceeds, instead of dead-ending on needs_authoring and forcing a hand-edit of hypotheses.json.
+	if hyp.Benchmark.NeedsAuthoring || hyp.Benchmark.Name == "" {
+		benches := detectBenchmarks(pkgDir)
+		name := hyp.Benchmark.Name
+		switch {
+		case name != "" && slices.Contains(benches, name):
+			// authored under the named benchmark - use it
+		case name == "" && len(benches) == 1:
+			name = benches[0]
+		case len(benches) == 0:
+			logf("NEEDS_BENCHMARK: %s needs a benchmark authored in the worktree package %s (%s), then re-run bench baseline.", o.ID, pkgDir, hyp.Benchmark.Pkg)
+			_ = model.WriteJSON(filepath.Join(runDir, "verdict.json"), model.Verdict{
+				ID: o.ID, Status: "need_more_data", Reason: "benchmark needs authoring",
+				Verdict: &model.VerdictDetail{Worktree: wt},
+			})
+			return wt, nil
+		default:
+			logf("NEEDS_BENCHMARK: %s - the worktree package %s has several benchmarks %v. Set benchmark.name in hypotheses.json to the one that exercises the change, then re-run.", o.ID, pkgDir, benches)
+			_ = model.WriteJSON(filepath.Join(runDir, "verdict.json"), model.Verdict{
+				ID: o.ID, Status: "need_more_data", Reason: "several benchmarks present - name the target in benchmark.name",
+				Verdict: &model.VerdictDetail{Worktree: wt},
+			})
+			return wt, nil
+		}
+		// persist the resolved benchmark so Verdict reuses it without a hand-edit
+		if err := model.SetBenchmarkName(o.Dir, o.ID, name); err != nil {
+			return "", err
+		}
+		hyp.Benchmark.Name = name
+		logf("adopted authored benchmark %s for %s", name, o.ID)
+	}
+
 	logf("compiling baseline binary for %s (%s)", hyp.Benchmark.Name, hyp.Benchmark.Pkg)
 	if _, stderr, err := helper.Run(pkgDir, "go", "test", "-c", "-o", filepath.Join(arun, "baseline.test"), "."); err != nil {
 		return "", fmt.Errorf("baseline compile failed for %s: %s", o.ID, stderr)
@@ -98,6 +138,22 @@ func Baseline(o Opts, logf func(string, ...any)) (string, error) {
 	}
 	fmt.Println(wt) // worktree path is the command result (consumed by the caller/agent)
 	return wt, nil
+}
+
+var benchFuncRe = regexp.MustCompile(`(?m)^func (Benchmark\w+)\(`)
+
+// detectBenchmarks returns the Benchmark funcs declared in the package's *_test.go files, so bench
+// baseline can adopt an authored benchmark instead of dead-ending on needs_authoring.
+func detectBenchmarks(pkgDir string) []string {
+	var out []string
+	files, _ := filepath.Glob(filepath.Join(pkgDir, "*_test.go"))
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		for _, m := range benchFuncRe.FindAllStringSubmatch(string(b), -1) {
+			out = append(out, m[1])
+		}
+	}
+	return out
 }
 
 // testFilesHash hashes the package's *_test.go files so we can detect a candidate that edits the
@@ -322,7 +378,7 @@ func Validate(o Opts, logf func(string, ...any)) error {
 	return Verdict(o, logf)
 }
 
-// ValidateAll sets up baselines for every hypothesis; the per-hypothesis code change is LLM-applied.
+// ValidateAll sets up baselines for every hypothesis - the per-hypothesis code change is LLM-applied.
 func ValidateAll(o Opts, logf func(string, ...any)) error {
 	logf = helper.OrNoop(logf)
 	hs, err := model.LoadHypotheses(o.Dir)

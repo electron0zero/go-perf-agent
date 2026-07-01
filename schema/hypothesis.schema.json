@@ -70,12 +70,6 @@
       }
     },
     "risk": { "type": "string", "enum": ["low", "med", "high"] },
-    "status": {
-      "type": "string",
-      "enum": ["proposed", "validating", "proved", "rejected", "need_more_data"],
-      "default": "proposed",
-      "description": "proposed -> validating -> one of: proved (benchstat win + tests pass), rejected (no win / regression / tests fail), need_more_data (no faithful benchmark, non-reproducible, or needs production telemetry to decide)"
-    },
     "verdict": {
       "type": "object",
       "description": "filled by the validation harness",

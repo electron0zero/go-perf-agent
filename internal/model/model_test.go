@@ -31,6 +31,20 @@ func TestStoreRoundtrip(t *testing.T) {
 	require.Error(t, err, "no file should error")
 }
 
+func TestSetBenchmarkName(t *testing.T) {
+	dir := t.TempDir()
+	hs := []Hypothesis{{ID: "h1", Benchmark: Benchmark{Pkg: "./pkg", NeedsAuthoring: true}}}
+	require.NoError(t, WriteJSON(filepath.Join(dir, "hypotheses.json"), hs))
+
+	require.NoError(t, SetBenchmarkName(dir, "h1", "BenchmarkFoo"))
+	got, err := GetHypothesis(dir, "h1")
+	require.NoError(t, err)
+	require.Equal(t, "BenchmarkFoo", got.Benchmark.Name)
+	require.False(t, got.Benchmark.NeedsAuthoring, "authoring resolved")
+
+	require.Error(t, SetBenchmarkName(dir, "nope", "X"), "unknown id errors")
+}
+
 func TestApplyCritic(t *testing.T) {
 	// reject on a PROVED downgrades to need_more_data and folds the gate reason in
 	v := Verdict{ID: "h1", Status: "proved", Verdict: &VerdictDetail{Reason: "significant improvement"}}
@@ -41,7 +55,7 @@ func TestApplyCritic(t *testing.T) {
 	require.Contains(t, v.Verdict.Reason, "downgraded by critic")
 	require.Contains(t, v.Verdict.Reason, "significant improvement")
 
-	// reject on a non-proved verdict only notes it; never changes status
+	// reject on a non-proved verdict only notes it - never changes status
 	r := Verdict{ID: "h2", Status: "rejected"}
 	require.False(t, r.ApplyCritic(true, "still bad"), "reject on rejected does not downgrade")
 	require.Equal(t, "rejected", r.Status, "critic never promotes")
