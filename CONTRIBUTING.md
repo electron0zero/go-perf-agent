@@ -1,6 +1,6 @@
 # Contributing
 
-PRs are welcome. Trivial fixes can go straight to a PR; for anything involved, open an issue to
+PRs are welcome. Trivial fixes can go straight to a PR. For anything involved, open an issue to
 discuss it first.
 
 Before opening a PR, run `make ci` (lint, tests, golden-scenario eval) and make sure it is green.

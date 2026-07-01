@@ -1,6 +1,6 @@
 ---
 name: gpa-critic
-description: Reflexion critic for go-perf-agent. A structurally distinct review pass (separate from the author and the validator) that vets a hypothesis before validation and reviews a PROVED change after, to catch behavior changes or benchmark-gaming the numeric gate cannot see. Can only downgrade a PROVED; never promotes a rejection.
+description: Reflexion critic for go-perf-agent. A structurally distinct review pass (separate from the author and the validator) that vets a hypothesis before validation and reviews a PROVED change after, to catch behavior changes or benchmark-gaming the numeric gate cannot see. Can only downgrade a PROVED, never promotes a rejection.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -22,10 +22,21 @@ Two points in the loop:
 ## Post-PROVED review
 
 The numeric gate proved a benchstat improvement and that tests passed. It cannot see semantics.
-Inspect the actual change and the benchmark:
+
+Re-read the changed symbol and its callers from the current source yourself, and form your own
+understanding of the behavior before and after. Do not accept the author's rationale or the diff
+alone - an independent read is the whole point of a distinct critic.
+
+Read the recorded numbers, do not re-run the benchmark: the gate already wrote them to
+`.go-perf-agent/runs/<id>/verdict.json` (the metrics are nested under `.verdict` - `delta`,
+`p_value`, `benchstat`, with `status` and a top-level `reason` at the root) plus the raw
+`baseline.txt`/`candidate.txt` in that dir. If you want to replicate a number, copy the worktree to
+/tmp first. Never edit the staged worktree - it is the reviewable patch.
+
+Inspect the actual change and the benchmark (`diff HEAD` includes the staged, authored benchmark):
 
 ```bash
-git -C .go-perf-agent/wt/<id> diff        # the one change
+git -C .go-perf-agent/wt/<id> diff HEAD    # the one change + the authored benchmark
 ```
 
 Ask, reading the diff and the benchmark/target source:
@@ -44,9 +55,9 @@ Ask, reading the diff and the benchmark/target source:
   `StopTimer`/`StartTimer` around per-iteration setup)? Setup left in the loop skews ns/op and the
   alloc count, which can manufacture or hide a delta.
 - For a concurrency transform (cow-atomic-config, batch-ops, bounded-worker-pool, atomic-counter),
-  the numeric gate cannot see broken semantics. Check: `-race` is clean; a copy-on-write reader
-  never mutates the shared snapshot in place; batching has not silently changed durability/ordering
-  (items lost on crash before flush); a worker pool preserves the ordering and error-propagation
+  the numeric gate cannot see broken semantics. Check: `-race` is clean, a copy-on-write reader
+  never mutates the shared snapshot in place, batching has not silently changed durability/ordering
+  (items lost on crash before flush), a worker pool preserves the ordering and error-propagation
   the callers rely on. Reject a fast-but-incorrect concurrency change.
 - For a gc-axis win, confirm the benchmark actually forces GC and measures mark/scan CPU or live
   bytes - a "GC win" with no GC in the timed region is gamed. Where possible, confirm the hot
@@ -67,7 +78,7 @@ go-perf-agent critic <id>
 go-perf-agent critic <id> --reject --reason "<specific, evidence-based reason>"
 ```
 `--reject` downgrades `proved` to `need_more_data` with your reason. You CANNOT turn a rejected
-or need_more_data into proved - the numeric gate owns wins; you can only veto a suspect one.
+or need_more_data into proved - the numeric gate owns wins, and you can only veto a suspect one.
 
 ## Pre-validation review
 
@@ -82,3 +93,6 @@ is spent on it.
   case, the moved work, the unfaithful input.
 - Default to skepticism on large wins with weak tests - that is exactly where false positives hide.
 - You veto, you do not author. If a fix is needed, hand back to the validation agent.
+- Bound the loop: review a given hypothesis at most twice. If a re-authored change still fails your
+  check on the second pass, downgrade it to need_more_data and hand back - do not ping-pong with the
+  author indefinitely.

@@ -62,7 +62,7 @@ Tools on PATH (run `go-perf-agent check` to check):
 | `go` | 1.23+ | building/running go-perf-agent and benchmarks                          |
 | `git` | 2.5+ | per-hypothesis worktrees, diff modes                                   |
 | `benchstat` | latest | the numeric gate (`go install golang.org/x/perf/cmd/benchstat@latest`) |
-| `gcx` | v0.4.2+ | production telemetry (optional; local profiling works without it)      |
+| `gcx` | v0.4.2+ | production telemetry (optional - local profiling works without it)     |
 | `gh` | latest | for PR diff mode only                                                  |
 
 Production telemetry needs gcx v0.4.2+ (`go install github.com/grafana/gcx/cmd/gcx@latest`),
@@ -72,7 +72,7 @@ authenticated with `gcx auth login`. Earlier builds lack the required `tempo que
 ## Use cases
 
 The same benchmark gate runs from three starting points:
-1. Production telemetry: point it at a service + time window; it finds the prod hot path
+1. Production telemetry: point it at a service + time window. It finds the prod hot path
   and proposes code-level wins. Best when the service has Tempo + Pyroscope telemetry.
 2. A GitHub PR: review the changed code for optimizations, and check the PR did not make a changed
   function slower (`bench regression`).
@@ -88,11 +88,11 @@ package or function you want to optimize.
   has different hardware, inputs, and load - re-check the same telemetry in prod before trusting it.
 - Results are only as good as the machine. For stable numbers run on an idle machine on AC power
   (not battery), and close other CPU users - browser, IDE/VS Code, video, chat - so only the terminal
-  runs; a laptop will still thermal-throttle. On Linux, [`perflock`](https://github.com/aclements/perflock)
+  runs. A laptop will still thermal-throttle. On Linux, [`perflock`](https://github.com/aclements/perflock)
   pins CPU frequency. The gate interleaves the before/after runs and compares with `benchstat`, its
-  [recommended practice](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat); raise `GPA_BENCH_COUNT`
+  [recommended practice](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat). Raise `GPA_BENCH_COUNT`
   (default 10, benchstat's floor) for smaller deltas.
-- Without `scope`, the whole codebase is in play; use `--include`/`--exclude` to keep agents off
+- Without `scope`, the whole codebase is in play. Use `--include`/`--exclude` to keep agents off
   vendored, generated, or frozen packages.
 - Proved changes are left in throwaway worktrees under `.go-perf-agent/wt/` for you to review and
   cherry-pick.

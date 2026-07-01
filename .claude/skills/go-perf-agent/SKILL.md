@@ -6,16 +6,17 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Agent, AskUserQuestion
 
 # go-perf-agent
 
-LLM-assisted Go performance audit over production telemetry (Tempo + Pyroscope via gcx). A hybrid system: deterministic
-tools do all telemetry collection and measurement; the LLM only reasons about code (forming
-hypotheses, applying one change, authoring a missing benchmark). Hard numbers from `benchstat`
-decide keep/reject - never the model. See `DECISIONS.md` for why.
+LLM-assisted Go performance audit over production telemetry (Tempo + Pyroscope via gcx). A hybrid system: the model is
+the core driver - it reasons about the code, forms hypotheses, authors the benchmark, and applies each
+change, while the deterministic tools handle telemetry collection and measurement. benchstat is the objective
+gate that verifies each keep/reject, so a win is proven by measurement rather than asserted - it guards
+the model, it does not replace it. See `DECISIONS.md` for why.
 
 Findings are LLM-assisted hypotheses. A PROVED verdict means "worth shipping behind a flag and
 measuring", NOT "proven". Always tell the user to validate each accepted change in production
 against real traffic and the same telemetry before trusting it.
 
-The CLI is the `go-perf-agent` binary (a single Go program; build with `make build`, or
+The CLI is the `go-perf-agent` binary (a single Go program - build with `make build`, or
 `go build -o go-perf-agent ./cmd/go-perf-agent`, and put it on PATH). Run it from the target Go module root.
 Working state lives in `.go-perf-agent/` (gitignored).
 
@@ -29,18 +30,67 @@ COLLECT -> EXTRACT -> HYPOTHESIZE -> VALIDATE (per worktree) -> REPORT -> VERIFY
  (tools)   (tools)     (LLM+catalog)  (tools measure, LLM edits)  (tools)   (user)
 ```
 
+Loop-back routing (VALIDATE is per hypothesis, and its verdict decides what happens next):
+- REJECTED -> drop it, move to the next candidate hotspot. Do not retry the same change.
+- NEED_MORE_DATA -> act on the reason. Needs a benchmark authored -> author it, re-run baseline. Needs
+  a dependency opt-in -> widen scope and re-run. Needs production data or is un-benchmarkable -> record
+  it and move on. Never silently drop it.
+- PROVED -> hand to CRITIQUE, then it lands in REPORT.
+When every candidate has a verdict, run REPORT. `go-perf-agent status` is the completeness check - it
+fails until report.md exists with a verdict per hypothesis, so run it before you call the audit done.
+
+## Definition of done - run the FULL loop, never short-circuit
+
+This is a hard gate, not a suggestion. An audit is DONE only when `.go-perf-agent/report.md` exists
+with a verdict per candidate. Collecting profiles and ranking hotspots is NOT the deliverable - it is
+step 2 of 6.
+
+The failure mode to prevent: after EXTRACT you hand-write the analysis in prose and stop, so
+`hypotheses.json` is never written, VALIDATE never runs, the benchstat gate never fires, and `report`
+is never called. If you catch yourself summarizing findings instead of producing `hypotheses.json` and
+running VALIDATE, STOP and run the loop. You drive the analysis - but each hypothesis has to be
+VERIFIED by the benchmark gate and shipped as a reviewable patch with its numbers, not left as an
+unverified claim in prose.
+
+This holds even when the biggest levers are config, architecture, or a dependency and feel
+"un-benchmarkable". A config/architecture/dependency finding is STILL a hypothesis: emit it in
+`hypotheses.json` (with the `dependency` field, or as a `workload`/advisory finding, or as an explicit
+null with a reason). Then VALIDATE runs it (dependency -> `need_more_data` opt-in, workload ->
+advisory, code -> the gate), and `report` collects every verdict. Never drop a lever to prose because
+it is hard to benchmark - encode it, let the loop record it, and let `report.md` carry it.
+
+`report` will error if there are no verdicts, and `hotspots` prints the remaining stages, precisely so
+this short-circuit is caught. Do not treat those as noise.
+
+## State files (the handoff contract)
+
+Stages connect through files under `.go-perf-agent/` (gitignored), not direct calls. Each is written
+by one stage and read by the next, so any stage can re-run in isolation:
+
+| file | written by | read by |
+|------|-----------|---------|
+| `profiles/*.pb.gz`, `*.prof` | COLLECT (`collect profiles`/`local`) | `hotspots`, analysts |
+| `traces/*.json` | COLLECT (`collect traces`) | `trace-summary`, analysts |
+| `deployed_version` | COLLECT (`collect profiles`) | `bench baseline` (version pin) |
+| `hotspots.json` | EXTRACT (`hotspots`) | you + analysts |
+| `scope.json` | `scope` / `target-diff` | `hotspots`, the structural gate |
+| `hypotheses.json` | HYPOTHESIZE (you + `gpa-analyst`) | `bench`/`validate`, `report` |
+| `wt/<id>/` | VALIDATE (`bench baseline`) | `bench verdict`, you (the patch) |
+| `runs/<id>/verdict.json` | VALIDATE (`bench verdict`) + CRITIQUE (`critic`) | `report`, `status` |
+| `report.md` | REPORT (`report`) | the user |
+
 ## Agents (in `.claude/agents/`)
 
 You are the orchestrator - drive the loop below and spawn these four specialists (there is no
-separate control agent; this skill is the controller):
+separate control agent - this skill is the controller):
 
 - `gpa-query-telemetry` - finds WHERE it is slow (Tempo/Pyroscope via gcx, or local pprof when
-  gcx is absent); asks the user for service/window/UIDs or a target function. Stage: COLLECT.
-- `gpa-analyst` - one per candidate hotspot; locates it in source, understands why it is hot,
+  gcx is absent). Asks the user for service/window/UIDs or a target function. Stage: COLLECT.
+- `gpa-analyst` - one per candidate hotspot. Locates it in source, understands why it is hot,
   and forms a testable hypothesis (or null). Stages: EXTRACT + HYPOTHESIZE.
-- `gpa-validation` - authors benchmark, applies one change, runs the gate; sets `proved` /
+- `gpa-validation` - authors benchmark, applies one change, runs the gate, sets `proved` /
   `rejected` / `need_more_data`. Stage: VALIDATE.
-- `gpa-critic` - structurally distinct reflexion pass; reviews each `proved` change for
+- `gpa-critic` - structurally distinct reflexion pass. Reviews each `proved` change for
   behavior-preservation / benchmark-gaming and can downgrade it. Stage: CRITIQUE.
 
 Other entry points: `go-perf-agent target-diff` (review a PR / local diff - changed funcs become
@@ -55,13 +105,13 @@ gcx auth login           # ONLY if collecting live telemetry and the session is 
 
 If `check` warns that gcx lacks `tempo query` / `exemplars` / `-o pprof`, tell the user to upgrade
 gcx (v0.4.2+) before the production path. If the user has not picked a target service/window, ASK
-(AskUserQuestion). Do not guess. For an incident, ask for the firing window; given a single
+(AskUserQuestion). Do not guess. For an incident, ask for the firing window. Given a single
 timestamp, query +-5 min around it (`--from/--to`), not "now".
 
 ## Step 1 - COLLECT (deterministic)
 
 Production-telemetry path (gcx set up + `gcx auth login`) - TRACES FIRST, then profiles. In production, traces
-say which operation is slow; profiles then explain that operation at the code level. Profiles
+say which operation is slow, and profiles then explain that operation at the code level. Profiles
 alone can rank CPU that is not on the slow path.
 ```bash
 go-perf-agent collect traces    --service <svc> --window 1h --ds-uid <tempo-ds-uid>   # 1. slowest operations (TraceQL)
@@ -78,7 +128,7 @@ span profiling (otel-profiling-go) on the slow service, and by default only the 
 tagged. When neither span-id nor exemplars resolve, drop the flags and pull the service-wide
 profile - the trace step still narrowed you to the slow service/operation. Datasource UIDs come
 from `gcx datasources list` (or GPA_TEMPO_DS_UID / GPA_PYRO_DS). collect profiles writes real pprof
-(.pb.gz); hotspots parses it.
+(.pb.gz), and hotspots parses it.
 
 Local fallback (gcx not set up / not authed) - profile with go pprof, no Grafana. This is the
 only profiles-first path:
@@ -101,13 +151,13 @@ Only `editable:true` symbols (in this module, not stdlib/vendor) are candidates.
 
 For each top editable hotspot, read the symbol's source (resolve `file:line` with Grep/Read)
 and match it against `go-perf-agent/catalog/patterns.yaml`. The catalog's `detect` regexes
-pre-filter which patterns are even plausible; you make the judgement call among them.
+pre-filter which patterns are even plausible - you make the judgement call among them.
 
 Work the optimization hierarchy biggest-lever-first: before any constant-factor pattern, ask
 "can this work be ELIMINATED, CACHED, or CALLED LESS OFTEN?" The fastest code is the code that
-never runs, and a better algorithm/data structure beats any micro-transform; the catalog is the
+never runs, and a better algorithm/data structure beats any micro-transform - the catalog is the
 bottom (implementation) tier. When reading a profile, optimize where flat time is high but
-navigate by cumulative time (a 0%-flat / high-cum driver tells you where to descend);
+navigate by cumulative time (a 0%-flat / high-cum driver tells you where to descend).
 `go tool pprof` top / top -cum / list / web are the tools.
 
 Produce `.go-perf-agent/hypotheses.json` - an array conforming to
@@ -117,22 +167,24 @@ benchmark that can prove it. Rules:
 - Tie every hypothesis to a real signal (the hotspot's weight + metric). No signal, no
   hypothesis.
 - Amdahl's law caps the win at the symbol's share. Do not spend a worktree on a hotspot that is a
-  tiny fraction of the profile (rule of thumb: skip sub-1% symbols); a perfect fix there is
+  tiny fraction of the profile (rule of thumb: skip sub-1% symbols) - a perfect fix there is
   invisible end-to-end. Prefer the heaviest in-scope candidates.
 - Pick `metric` = the benchstat metric that should move (`ns_op`/`B_op`/`allocs_op`),
   matching the pattern's `optimizes`.
 - If no benchmark exercises the symbol, set `benchmark.needs_authoring: true` and name the
-  package; you will author it in the worktree during validation.
+  package. You will author it in the worktree during validation.
 - Prefer low-`risk` patterns first.
 - Also send the top few NON-editable hot symbols (high-weight vendored OSS / generated code,
   `editable:false` in hotspots.json) to analysts - they are excluded from `candidate` but are
   changeable, and the analyst will return a `DEPENDENCY_CHANGE_NEEDED` object for them rather
   than dropping a real, large lever on the floor.
 - Delegate the per-symbol analysis to parallel `gpa-analyst` agents (one per candidate
-  hotspot); collect their structured objects into the array, dropping nulls.
+  hotspot), collecting their structured objects into the array, dropping nulls. Pass each analyst
+  the ABSOLUTE path to the target module's `.go-perf-agent/profiles/` so it can run `go tool pprof
+  -list` for line-level attribution - the profiles are in the audited repo, not this tool's repo.
 - When the real lever is in a vendored OSS dependency (under `vendor/`) or generated code, the
   analyst still returns a normal hypothesis - with the `dependency` field set (`path`, `kind`,
-  `upstream`). It goes in `hypotheses.json` like any other; it is just a hypothesis that touches a
+  `upstream`). It goes in `hypotheses.json` like any other - it is just a hypothesis that touches a
   dependency. The harness will not auto-validate it until the user opts in by scoping to
   `dependency.path` (bench baseline writes a `need_more_data` "opt-in" verdict otherwise).
 
@@ -151,7 +203,7 @@ go-perf-agent bench baseline <id>        # creates .go-perf-agent/wt/<id> worktr
   `b.ReportAllocs()`. If you cannot write a faithful benchmark, mark the hypothesis
   `need_more_data`.
 - Apply EXACTLY ONE change in `.go-perf-agent/wt/<id>/` - the transform from the pattern. Do not
-  batch changes; the verdict must be attributable. Keep the diff minimal.
+  batch changes - the verdict must be attributable. Keep the diff minimal.
 - After the verdict, stage the worktree (`git -C .go-perf-agent/wt/<id> add -A`) so the authored
   benchmark+test ship inside the patch – an untracked benchmark is invisible to `git diff`, and a
   patch without it can't be re-run to prove the gain.
@@ -162,9 +214,11 @@ go-perf-agent bench verdict <id>         # tests -> interleaved A/B benchmark ->
 
 The gate (pure, no model input): PROVED iff correctness tests pass AND the proof metric shows
 a statistically significant improvement (benchstat, p<alpha) AND no other metric
-significantly regresses; REJECTED otherwise; NEED_MORE_DATA when it cannot be honestly tested
+significantly regresses. REJECTED otherwise. NEED_MORE_DATA when it cannot be honestly tested
 locally (no faithful benchmark, within-noise, or needs prod data). The verdict + benchstat
-table land in `.go-perf-agent/runs/<id>/verdict.json`.
+table land in `.go-perf-agent/runs/<id>/verdict.json`. Note the shape: `status` and a top-level
+`reason` sit at the root, but the numbers are nested under `.verdict` (`delta`, `p_value`,
+`benchstat`, `worktree`). Query `.verdict.delta`, not `.delta`.
 
 Interleaved A/B (baseline and candidate binaries alternated run-by-run) is what makes the
 verdict trustworthy on a noisy laptop - do not replace it with two separate `go test` runs.
@@ -215,11 +269,11 @@ proved hypothesis, tell the user to:
 2. re-pull the SAME Pyroscope profile and Tempo traces for the service after rollout, and
 3. confirm the hot symbol's weight actually dropped and latency/alloc moved the predicted way,
    with no regression elsewhere. Diff the before/after profiles directly with
-   `go tool pprof -diff_base=before.pb.gz after.pb.gz` (signed delta; improvements negative) - or
+   `go tool pprof -diff_base=before.pb.gz after.pb.gz` (signed delta - improvements negative) - or
    `-base` to subtract the baseline - so the change is the subject, not eyeballed side by side.
    See `go tool pprof -help` for the comparison flags.
 For a `gc`-pattern win (sync-pool, reduce-pointers-gc, slice/map reuse), the benchstat allocs/op
-drop is the local proxy; confirm the real effect in production with `GODEBUG=gctrace=1` (GC
+drop is the local proxy - confirm the real effect in production with `GODEBUG=gctrace=1` (GC
 frequency / pause) and the process's GOGC / GOMEMLIMIT, since GC CPU and pauses do not show up in
 a microbenchmark's ns/op. For a gc-bound service, also surface the zero-code lever: raising GOGC or
 setting GOMEMLIMIT (soft cap, Go 1.19+) can cut GC CPU or prevent OOM with no source change. This
@@ -233,7 +287,7 @@ Each hypothesis works in its own `.go-perf-agent/wt/<id>` worktree, so the file-
 authoring a benchmark, applying the one change, compiling the baseline (`bench baseline`) - can run
 concurrently across hypotheses.
 
-But the measurement step (`bench verdict`) MUST run one at a time. Benchmarks measure wall-clock; two
+But the measurement step (`bench verdict`) MUST run one at a time. Benchmarks measure wall-clock, and two
 running at once contend for CPU, cache, and memory bandwidth, which defeats the run-by-run
 interleaving the gate uses to cancel time-correlated noise. Worktree isolation prevents file
 conflicts, not measurement interference. So fan out the analysts and baseline setup if you like, but
@@ -246,11 +300,11 @@ producing noise. Still schedule them serially - the lock is a backstop, not a qu
 Ensure the machine is idle before measuring: on AC power (not battery), with the browser, IDE/editor,
 video, and chat closed so only the terminal is active - a laptop will still thermal-throttle, which
 widens intervals. The gate interleaves the before/after runs (benchstat's recommended practice) and
-needs enough samples: `GPA_BENCH_COUNT` defaults to 10 (benchstat's floor); raise it for smaller
+needs enough samples: `GPA_BENCH_COUNT` defaults to 10 (benchstat's floor). Raise it for smaller
 deltas. On Linux, [`perflock`](https://github.com/aclements/perflock) pins CPU frequency.
 
 ## Cleanup
 
-Keep proved worktrees until the user has cherry-picked the change; then `go-perf-agent clean` removes
+Keep proved worktrees until the user has cherry-picked the change, then `go-perf-agent clean` removes
 all the per-hypothesis worktrees (full checkouts + compiled `.test` binaries) and prunes - `--all`
 also wipes collected + derived artifacts, keeping `scope.json`. For a single one, `git worktree remove .go-perf-agent/wt/<id>`.
